@@ -62,13 +62,17 @@ def _split_assignment(item: str) -> tuple[str, Any]:
 # --------------------------------------------------------------------- commands
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import serve
-    serve(
-        args.app,
-        transport=args.transport,
-        host=args.host,
-        port=args.port,
-        guard=build_guardrails(args),
-    )
+    try:
+        serve(
+            args.app,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            guard=build_guardrails(args),
+        )
+    except ValueError as e:  # fail-closed / bad transport -> clean message, not a traceback
+        print(str(e), file=sys.stderr)
+        return 1
     return 0
 
 
@@ -81,12 +85,18 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     for w in out["widgets"]:
         flag = " [action]" if w.get("action") else ""
         print(f"  {w['kind']:<13} {w['identifier']:<14} = {w['value']!r}{flag}")
+    if args.layout:
+        for o in out.get("outputs", []):
+            print(f"  [{o['kind']}] {o['text']}")
+        state = out.get("session_state") or {}
+        if state:
+            print("  session_state:")
+            for k, v in state.items():
+                print(f"    {k} = {v!r}")
     return 0
 
 
 def cmd_call(args: argparse.Namespace) -> int:
-    from .engine import PermissionDenied
-    from .runtime import RuntimeError_
     try:
         eng = _engine(args)
         for item in args.set or []:
@@ -95,7 +105,7 @@ def cmd_call(args: argparse.Namespace) -> int:
         for ident in args.click or []:
             eng.click(ident)
         result = eng.get_state() if args.state else eng.read_output()
-    except (PermissionDenied, RuntimeError_, ValueError) as e:
+    except Exception as e:  # CLI: surface any failure as a clean message + exit 1
         print(str(e), file=sys.stderr)
         return 1
     if args.json:
@@ -160,5 +170,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     return args.func(args)
 
 
-if __name__ == "__main__":
+def _cli() -> None:
+    """Console-script entry point. Propagates the exit code — entry-point shims call the
+    target and ignore its return value, so returning from main() would always exit 0."""
     raise SystemExit(main())
+
+
+if __name__ == "__main__":
+    _cli()

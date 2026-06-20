@@ -133,12 +133,14 @@ class AppTestRuntime:
 
     def _session_state(self) -> dict:
         ss = self.at.session_state
-        for getter in (lambda: dict(ss.filtered_state), lambda: {k: ss[k] for k in ss}):
-            try:
-                return getter()
-            except Exception:
-                continue
-        return {}
+        try:
+            return dict(ss.filtered_state)
+        except AttributeError:
+            pass
+        try:  # fallback via explicit keys (iterating ss yields positions, not keys)
+            return {k: ss[k] for k in ss.keys()}
+        except Exception:
+            return {}
 
     def _exception(self) -> Optional[str]:
         exc = getattr(self.at, "exception", None)
@@ -186,6 +188,9 @@ class AppTestRuntime:
                 return float(value)
         if kind == "multiselect" and isinstance(value, str):
             return [value]
+        if kind in ("text_input", "text_area") and not isinstance(value, str):
+            # a JSON-typed value (True/41/None) bound for a text field becomes its string
+            return str(value)
         return value
 
     @staticmethod

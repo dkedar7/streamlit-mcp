@@ -48,7 +48,9 @@ def core_tool_handlers(engine: Engine) -> dict:
 def _derive_session_id(ctx: Any) -> str:
     if ctx is None:
         return "default"
-    for attr in ("session_id", "client_id", "request_id"):
+    # NB: not request_id — it changes per request, which would spin up a fresh runtime
+    # (and leak it) on every call instead of persisting one session per client.
+    for attr in ("session_id", "client_id"):
         val = getattr(ctx, attr, None)
         if val:
             return str(val)
@@ -143,6 +145,13 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000, guard: Optional[Any] = None) -> None:
     """Build and run the server on the chosen transport (blocking)."""
     _validate_transport(transport)
+    if transport in ("http", "sse") and host not in ("127.0.0.1", "::1", "localhost"):
+        # Bearer auth is not yet enforced on the transport (see CHANGELOG), so refuse to
+        # expose an unauthenticated server beyond loopback. Fail closed.
+        raise ValueError(
+            f"Refusing to serve {transport} on non-loopback host {host!r}: HTTP bearer auth "
+            "is not yet enforced. Bind to 127.0.0.1 for local agents, or use stdio."
+        )
     mcp = build_server(app_path, guard=guard)
     if transport == "stdio":
         mcp.run()

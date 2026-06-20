@@ -13,6 +13,7 @@ from typing import Any, Optional
 from .elements import (
     detect_unsupported,
     outputs_to_list,
+    serialize_value,
     tool_schema_for,
     widgets_to_models,
 )
@@ -42,7 +43,7 @@ class Engine:
         out: dict = {
             "widgets": self._visible_widgets(snap),
             "outputs": outputs_to_list(snap),
-            "session_state": snap.session_state,
+            "session_state": serialize_value(snap.session_state),
         }
         if self.app_path:
             out["unsupported"] = detect_unsupported(self.app_path)
@@ -54,12 +55,12 @@ class Engine:
         snap = self.rt.snapshot()
         return {
             "outputs": outputs_to_list(snap),
-            "session_state": snap.session_state,
+            "session_state": serialize_value(snap.session_state),
             "exception": snap.exception,
         }
 
     def get_state(self) -> dict:
-        return self.rt.snapshot().session_state
+        return serialize_value(self.rt.snapshot().session_state)
 
     # --------------------------------------------------------------- writes
     def set_widget(self, identifier: str, value: Any) -> dict:
@@ -87,5 +88,15 @@ class Engine:
             raise PermissionDenied("server is in read-only mode")
 
     def _guard_allowed(self, identifier: str) -> None:
-        if self.guard is not None and not self.guard.is_allowed(identifier):
-            raise PermissionDenied(f"widget {identifier!r} is not in the allow-list")
+        if self.guard is None or self.guard.is_allowed(identifier):
+            return
+        # The caller may pass a key or a label; allow if the resolved widget's identifier
+        # OR label is allow-listed (consistent with filter_widgets, which matches both).
+        for m in widgets_to_models(self.rt.snapshot()):
+            if identifier in (m["identifier"], m["label"]):
+                if self.guard.is_allowed(m["identifier"]) or (
+                    m["label"] and self.guard.is_allowed(m["label"])
+                ):
+                    return
+                break
+        raise PermissionDenied(f"widget {identifier!r} is not in the allow-list")

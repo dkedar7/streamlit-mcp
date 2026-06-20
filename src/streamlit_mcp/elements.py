@@ -35,12 +35,17 @@ _UNSUPPORTED_RE = re.compile(
 
 
 def serialize_value(value: Any) -> Any:
-    """Make a widget value JSON-safe (dates -> ISO strings, tuples -> lists)."""
+    """Make a value JSON-safe (dates -> ISO strings, tuples -> lists, dicts recursed,
+    unknown objects -> str). Used for both widget values and session_state."""
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.isoformat()
     if isinstance(value, (list, tuple)):
         return [serialize_value(v) for v in value]
-    return value
+    if isinstance(value, dict):
+        return {str(k): serialize_value(v) for k, v in value.items()}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 def _identifier(w: WidgetSnapshot) -> str:
@@ -121,5 +126,8 @@ def detect_unsupported_source(source: str) -> list[dict]:
 
 
 def detect_unsupported(app_path: str) -> list[dict]:
-    with open(app_path, "r", encoding="utf-8") as fh:
-        return detect_unsupported_source(fh.read())
+    try:
+        with open(app_path, "r", encoding="utf-8") as fh:
+            return detect_unsupported_source(fh.read())
+    except OSError:
+        return []  # missing/unreadable app file -> no unsupported report, not a crash

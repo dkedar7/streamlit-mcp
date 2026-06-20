@@ -4,15 +4,31 @@ version = "0.1.0"
 description = "Serve an existing Streamlit app as an MCP server — agents drive it natively, no browser."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "Kedar Dabhadkar" }]
+keywords = ["streamlit", "mcp", "model-context-protocol", "agent", "llm", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "streamlit>=1.58",
-    "fastmcp>=2",
+    "fastmcp>=3,<4",
 ]
 
+[project.urls]
+Homepage = "https://github.com/dkedar7/streamlit-mcp"
+Source = "https://github.com/dkedar7/streamlit-mcp"
+"Bug Tracker" = "https://github.com/dkedar7/streamlit-mcp/issues"
+Changelog = "https://github.com/dkedar7/streamlit-mcp/blob/main/CHANGELOG.md"
+
 [project.scripts]
-streamlit-mcp = "streamlit_mcp.cli:main"
+streamlit-mcp = "streamlit_mcp.cli:_cli"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

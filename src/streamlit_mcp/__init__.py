@@ -7,4 +7,23 @@ engine an agent uses (parity).
 
 __version__ = "0.1.0"
 
-from .decorator import mcp_tool  # noqa: E402,F401  (public API for semantic tools)
+# Public API
+from .decorator import mcp_tool  # noqa: E402
+from .engine import Engine, PermissionDenied  # noqa: E402
+from .guardrails import Guardrails  # noqa: E402
+from .runtime import AppTestRuntime, Runtime, RuntimeError_, WidgetNotFound  # noqa: E402
+from .server import build_server, serve  # noqa: E402
+
+__all__ = [
+    "__version__",
+    "mcp_tool",
+    "Engine",
+    "PermissionDenied",
+    "Guardrails",
+    "AppTestRuntime",
+    "Runtime",
+    "RuntimeError_",
+    "WidgetNotFound",
+    "build_server",
+    "serve",
+]
