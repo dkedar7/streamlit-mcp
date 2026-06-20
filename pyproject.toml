@@ -1,0 +1,29 @@
+[project]
+name = "streamlit-mcp"
+version = "0.1.0"
+description = "Serve an existing Streamlit app as an MCP server — agents drive it natively, no browser."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Kedar Dabhadkar" }]
+dependencies = [
+    "streamlit>=1.58",
+    "fastmcp>=2",
+]
+
+[project.scripts]
+streamlit-mcp = "streamlit_mcp.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/streamlit_mcp"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
