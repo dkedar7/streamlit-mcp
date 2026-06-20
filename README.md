@@ -5,11 +5,12 @@ set values, click buttons, and read the rendered output and `session_state` — 
 over MCP, with **no browser automation**.
 
 ```bash
-uv tool install .        # or: pip install .
+pip install streamlit-mcp          # or run with no install via: uvx streamlit-mcp ...
 
-# serve an app over MCP (stdio for local clients, or HTTP/SSE for networked agents)
+# serve an app over MCP (stdio for local clients)
 streamlit-mcp serve app.py
-streamlit-mcp serve app.py --transport http --host 127.0.0.1 --port 8000
+# ...or HTTP/SSE on loopback for local networked agents
+streamlit-mcp serve app.py --transport http --port 8000
 
 # drive it yourself from the terminal (same engine the agent uses)
 streamlit-mcp inspect app.py
@@ -20,6 +21,31 @@ Streamlit has no callback graph — it reruns the whole script per interaction �
 streamlit-mcp drives the app headlessly through Streamlit's own test runtime
 (`streamlit.testing.v1.AppTest`) and returns the **semantic element tree**, not pixels.
 Gradio and Dash already shipped native app-as-MCP; this fills the Streamlit gap.
+
+## Use it with an MCP client
+
+**Claude Desktop / Cursor** — add to your MCP config (`claude_desktop_config.json` or
+`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "streamlit-mcp": {
+      "command": "uvx",
+      "args": ["streamlit-mcp", "serve", "/absolute/path/to/your/app.py"]
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```bash
+claude mcp add streamlit-mcp -- uvx streamlit-mcp serve /absolute/path/to/your/app.py
+```
+
+`uvx` runs the published package with no prior install. stdio (the default) is the right
+transport for local clients.
 
 ## Tools exposed to agents
 
