@@ -6,3 +6,5 @@ engine an agent uses (parity).
 """
 
 __version__ = "0.1.0"
+
+from .decorator import mcp_tool  # noqa: E402,F401  (public API for semantic tools)
