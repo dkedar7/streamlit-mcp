@@ -1,6 +1,6 @@
 [project]
 name = "streamlit-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Serve an existing Streamlit app as an MCP server — agents drive it natively, no browser."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [

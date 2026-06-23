@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from typing import Any, Optional
 
+from . import __version__
 from .engine import Engine
 from .guardrails import Guardrails
 from .runtime import AppTestRuntime
@@ -23,6 +25,28 @@ def _force_utf8_output() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+
+
+_BARE_WARNING_FILTERED = False
+
+
+def _drop_scriptruncontext_warning(record: logging.LogRecord) -> bool:
+    # AppTest runs the app in bare mode (no ScriptRunContext), so Streamlit logs a noisy,
+    # explicitly-ignorable "missing ScriptRunContext!" warning on every inspect/call/serve.
+    # A filter (not setLevel) is used because Streamlit re-applies its own level to its
+    # loggers when the runtime initializes, which would undo a level change.
+    return "ScriptRunContext" not in record.getMessage()
+
+
+def _quiet_bare_mode_warning() -> None:
+    """Suppress Streamlit's bare-mode 'missing ScriptRunContext!' warning (idempotent)."""
+    global _BARE_WARNING_FILTERED
+    if _BARE_WARNING_FILTERED:
+        return
+    logging.getLogger(
+        "streamlit.runtime.scriptrunner_utils.script_run_context"
+    ).addFilter(_drop_scriptruncontext_warning)
+    _BARE_WARNING_FILTERED = True
 
 
 def build_guardrails(args: argparse.Namespace) -> Optional[Guardrails]:
@@ -93,6 +117,11 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             print("  session_state:")
             for k, v in state.items():
                 print(f"    {k} = {v!r}")
+        unsupported = out.get("unsupported") or []
+        if unsupported:
+            print("  unsupported:")
+            for u in unsupported:
+                print(f"    {u['element']}: {u['reason']}")
     return 0
 
 
@@ -134,6 +163,8 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="streamlit-mcp",
                                      description="Serve a Streamlit app as an MCP server.")
+    parser.add_argument("--version", action="version",
+                        version=f"streamlit-mcp {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_serve = sub.add_parser("serve", help="serve an app over MCP")
@@ -166,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     _force_utf8_output()
+    _quiet_bare_mode_warning()
     args = build_parser().parse_args(argv)
     return args.func(args)
 

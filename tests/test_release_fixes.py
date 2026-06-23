@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+UNSUPPORTED_APP = str(Path(__file__).parent / "apps" / "unsupported_app.py")
 
 
 # --- P1: text widget + JSON-looking value no longer crashes the CLI ---
@@ -82,3 +83,39 @@ def test_inspect_layout_prints_outputs(capsys):
     assert main(["inspect", APP, "--layout"]) == 0
     out = capsys.readouterr().out
     assert "Hello, world!" in out and "session_state:" in out
+
+
+# --- 0.1.1 #1: inspect --layout (text) reports unsupported elements, never drops them ---
+def test_inspect_layout_text_reports_unsupported(capsys):
+    """The text layout must list unsupported elements, matching --json and MCP get_layout
+    (the "reported explicitly, never silently dropped" guarantee / human<->agent parity)."""
+    from streamlit_mcp.cli import main
+    assert main(["inspect", UNSUPPORTED_APP, "--layout"]) == 0
+    out = capsys.readouterr().out
+    assert "unsupported:" in out
+    assert "file_uploader" in out
+
+
+# --- 0.1.1 #2: top-level --version prints the version and exits 0 ---
+def test_version_flag(capsys):
+    import pytest
+    from streamlit_mcp import __version__
+    from streamlit_mcp.cli import main
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out
+
+
+# --- 0.1.1 #2: the bare-mode "missing ScriptRunContext!" warning is filtered out ---
+def test_bare_mode_scriptruncontext_warning_filtered():
+    import logging
+    from streamlit_mcp.cli import _quiet_bare_mode_warning
+    _quiet_bare_mode_warning()
+    lg = logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context")
+    rec = lg.makeRecord(
+        lg.name, logging.WARNING, __file__, 0,
+        "Thread 'MainThread': missing ScriptRunContext! This warning can be ignored "
+        "when running in bare mode.", None, None,
+    )
+    assert lg.filter(rec) is False  # at least one filter rejects the warning
