@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1 (2026-06-23)
+
+Fixes from a clean-room dogfood of the published 0.1.0.
+
+- **Fix (parity):** `inspect --layout` text output now lists unsupported elements. The
+  `unsupported` section was present in `--json` and the MCP `get_layout` tool but silently
+  dropped from the default human/text view, contradicting the "reported explicitly, never
+  silently dropped" guarantee (#1).
+- **Add:** a top-level `--version` flag (`streamlit-mcp --version`) (#2).
+- **Fix:** silence Streamlit's explicitly-ignorable "missing ScriptRunContext!" bare-mode
+  warning that leaked to stderr on every `inspect`/`call`/`serve` (#2).
+- **Packaging/docs:** declare Python 3.13 support (trove classifier + CI matrix); 0.1.0 is
+  marked released below (#2).
+
+## 0.1.0 (2026-06-20)
 
 First release. Serve an existing Streamlit app as an MCP server, driven headlessly via
 `streamlit.testing.v1.AppTest` — no browser automation.
