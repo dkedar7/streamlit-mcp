@@ -157,7 +157,8 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
                    help="allow-list a widget identifier (repeatable)")
     if bearer:
         p.add_argument("--bearer-token", dest="bearer_token",
-                       help="require this bearer token on HTTP/SSE")
+                       help="bearer token for HTTP/SSE (reserved; NOT yet enforced on the "
+                            "transport — see README security; serve warns if you set it)")
 
 
 def build_parser() -> argparse.ArgumentParser:

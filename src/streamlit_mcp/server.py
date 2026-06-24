@@ -8,6 +8,7 @@ plan's deferred open question; the isolation machinery itself is complete and te
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Optional
 
 from fastmcp import FastMCP
@@ -151,6 +152,16 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
         raise ValueError(
             f"Refusing to serve {transport} on non-loopback host {host!r}: HTTP bearer auth "
             "is not yet enforced. Bind to 127.0.0.1 for local agents, or use stdio."
+        )
+    if transport in ("http", "sse") and getattr(guard, "bearer_token", None):
+        # The token primitive is implemented but not yet wired to the transport, so a
+        # supplied bearer token does NOT gate requests. Warn loudly rather than imply a
+        # protection we don't deliver (see CHANGELOG known issues); never silently accept it.
+        print(
+            "WARNING: a bearer token is set but bearer auth is NOT yet enforced on the "
+            f"{transport} transport — this server accepts unauthenticated requests. Treat "
+            "127.0.0.1 as the only trust boundary until enforcement lands.",
+            file=sys.stderr,
         )
     mcp = build_server(app_path, guard=guard)
     if transport == "stdio":
