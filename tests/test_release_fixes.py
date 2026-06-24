@@ -119,3 +119,41 @@ def test_bare_mode_scriptruncontext_warning_filtered():
         "when running in bare mode.", None, None,
     )
     assert lg.filter(rec) is False  # at least one filter rejects the warning
+
+
+# --- 0.1.2 #4: serve warns that --bearer-token is not enforced (never silently a no-op) ---
+def _dummy_build_server(monkeypatch):
+    from streamlit_mcp import server
+
+    class DummyMCP:
+        def run(self, *a, **k):  # don't block the test on a real server
+            pass
+
+    monkeypatch.setattr(server, "build_server", lambda *a, **k: DummyMCP())
+    return server
+
+
+def test_serve_warns_when_bearer_token_unenforced(capsys, monkeypatch):
+    from streamlit_mcp.guardrails import Guardrails
+    server = _dummy_build_server(monkeypatch)
+    server.serve(APP, transport="http", host="127.0.0.1",
+                 guard=Guardrails(bearer_token="SECRET"))
+    err = capsys.readouterr().err
+    assert "not yet enforced" in err.lower()
+    assert "unauthenticated" in err.lower()
+
+
+def test_serve_no_bearer_warning_without_token(capsys, monkeypatch):
+    server = _dummy_build_server(monkeypatch)
+    server.serve(APP, transport="http", host="127.0.0.1", guard=None)
+    assert "not yet enforced" not in capsys.readouterr().err.lower()
+
+
+def test_serve_help_does_not_claim_bearer_required(capsys):
+    import pytest
+    from streamlit_mcp.cli import main
+    with pytest.raises(SystemExit):
+        main(["serve", "--help"])
+    out = capsys.readouterr().out
+    assert "--bearer-token" in out
+    assert "not yet enforced" in out.lower()

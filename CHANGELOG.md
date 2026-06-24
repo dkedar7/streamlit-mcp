@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 (2026-06-24)
+
+- **Fix (security UX):** `serve --transport http/sse` now prints a prominent stderr warning
+  when `--bearer-token` is set, because bearer auth is **not yet enforced** on the transport —
+  the server accepts unauthenticated loopback requests. Previously the flag was silently
+  accepted with no effect while `--help` claimed it was "required", implying a protection that
+  did not exist. The `--help` text now states the flag is reserved/not-yet-enforced (#4).
+  (Real `FastMCP(auth=…)` enforcement remains the documented top follow-up.)
+
 ## 0.1.1 (2026-06-23)
 
 Fixes from a clean-room dogfood of the published 0.1.0.
