@@ -121,7 +121,7 @@ def test_bare_mode_scriptruncontext_warning_filtered():
     assert lg.filter(rec) is False  # at least one filter rejects the warning
 
 
-# --- 0.1.2 #4: serve warns that --bearer-token is not enforced (never silently a no-op) ---
+# --- 0.2.0 #7: bearer auth is ENFORCED on HTTP/SSE ---
 def _dummy_build_server(monkeypatch):
     from streamlit_mcp import server
 
@@ -133,27 +133,39 @@ def _dummy_build_server(monkeypatch):
     return server
 
 
-def test_serve_warns_when_bearer_token_unenforced(capsys, monkeypatch):
+def test_bearer_auth_builds_verifier_only_when_token_set():
+    from streamlit_mcp.guardrails import Guardrails
+    from streamlit_mcp.server import bearer_auth
+    assert bearer_auth(None) is None
+    assert bearer_auth(Guardrails()) is None
+    v = bearer_auth(Guardrails(bearer_token="SEKRET"))
+    assert v is not None and hasattr(v, "verify_token")
+
+
+def test_serve_allows_nonloopback_when_token_set(monkeypatch):
+    # With a token, auth gates access, so a public host is permitted (must not raise).
     from streamlit_mcp.guardrails import Guardrails
     server = _dummy_build_server(monkeypatch)
-    server.serve(APP, transport="http", host="127.0.0.1",
-                 guard=Guardrails(bearer_token="SECRET"))
-    err = capsys.readouterr().err
-    assert "not yet enforced" in err.lower()
-    assert "unauthenticated" in err.lower()
+    server.serve(APP, transport="http", host="0.0.0.0",
+                 guard=Guardrails(bearer_token="SEKRET"))
 
 
-def test_serve_no_bearer_warning_without_token(capsys, monkeypatch):
-    server = _dummy_build_server(monkeypatch)
-    server.serve(APP, transport="http", host="127.0.0.1", guard=None)
-    assert "not yet enforced" not in capsys.readouterr().err.lower()
+def test_http_transport_requires_bearer_token():
+    """Real enforcement: the HTTP app returns 401 without a valid token, and not-401 with it."""
+    from starlette.testclient import TestClient
+    from streamlit_mcp.guardrails import Guardrails
+    from streamlit_mcp.server import bearer_auth, build_server
 
-
-def test_serve_help_does_not_claim_bearer_required(capsys):
-    import pytest
-    from streamlit_mcp.cli import main
-    with pytest.raises(SystemExit):
-        main(["serve", "--help"])
-    out = capsys.readouterr().out
-    assert "--bearer-token" in out
-    assert "not yet enforced" in out.lower()
+    guard = Guardrails(bearer_token="SEKRET")
+    mcp = build_server(APP, guard=guard, auth=bearer_auth(guard))
+    app = mcp.http_app(path="/mcp", json_response=True)
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "0"}}}
+    hdr = {"Accept": "application/json, text/event-stream",
+           "Content-Type": "application/json"}
+    with TestClient(app) as client:
+        assert client.post("/mcp", json=body, headers=hdr).status_code == 401
+        ok = client.post("/mcp", json=body,
+                         headers={**hdr, "Authorization": "Bearer SEKRET"})
+        assert ok.status_code != 401

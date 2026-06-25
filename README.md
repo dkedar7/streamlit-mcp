@@ -73,10 +73,11 @@ surfaces.
   runs it). Only serve apps you trust.
 - **`get_state` / `read_output` expose the app's `session_state`** to the caller — do not
   put secrets there.
-- **HTTP/SSE is loopback-only in v1.** A bearer-token primitive exists, but it is **not yet
-  enforced** on the transport, so `serve` refuses to bind HTTP/SSE to a non-loopback host.
-  Use stdio for local clients, or HTTP/SSE on `127.0.0.1`. Enforced networked auth is the
-  top follow-up (see `CHANGELOG.md`).
+- **HTTP/SSE bearer auth is enforced.** Pass `--bearer-token <T>` and every HTTP/SSE request
+  must send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool
+  runs. A non-loopback host is allowed **only** with a token set; without one, `serve` binds
+  `127.0.0.1` only and refuses a non-loopback host (fail closed). stdio is local and
+  unauthenticated.
 
 ## License
 
