@@ -5,7 +5,7 @@ interface); widgets auto-map to MCP tools, and a human-first CLI exercises the s
 engine an agent uses (parity).
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Public API
 from .decorator import mcp_tool  # noqa: E402

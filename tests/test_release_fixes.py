@@ -169,3 +169,56 @@ def test_http_transport_requires_bearer_token():
         ok = client.post("/mcp", json=body,
                          headers={**hdr, "Authorization": "Bearer SEKRET"})
         assert ok.status_code != 401
+
+
+# --- 0.2.1 #10: a failed set_widget must not poison a long-lived session ---
+POISON_APP = (
+    "import streamlit as st\n"
+    "n = st.number_input('Count', min_value=0, max_value=10, value=1)\n"
+    "c = st.selectbox('Color', ['red', 'green', 'blue'])\n"
+    "st.markdown(f'Count={n} Color={c}')\n"
+)
+
+
+def _markdown(rt):
+    return [o.text for o in rt.snapshot().outputs if o.kind == "markdown"]
+
+
+def test_invalid_selectbox_option_does_not_poison_session():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=POISON_APP)
+    rt.run()
+    rt.set_widget("Count", 5)
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Color", "purple")            # invalid -> clean error, nothing applied
+    # session is NOT poisoned: an unrelated widget still sets cleanly, Color unchanged
+    rt.set_widget("Count", 8)
+    assert "Count=8 Color=red" in _markdown(rt)
+    rt.set_widget("Color", "blue")                  # valid choice still works
+    assert "Count=8 Color=blue" in _markdown(rt)
+
+
+def test_invalid_multiselect_option_rejected_cleanly():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    script = ("import streamlit as st\n"
+              "t = st.multiselect('Tags', ['a', 'b', 'c'])\n"
+              "st.markdown('tags=' + ','.join(t))\n")
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Tags", ["a", "z"])           # 'z' not offered
+    rt.set_widget("Tags", ["a", "b"])               # session still usable
+    assert "tags=a,b" in _markdown(rt)
+
+
+def test_engine_set_widget_invalid_option_keeps_session_usable():
+    # The MCP tools dispatch to Engine.set_widget; a bad option must not brick the session.
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=POISON_APP)
+    rt.run()
+    eng = Engine(rt)
+    with pytest.raises(RuntimeError_):
+        eng.set_widget("Color", "purple")
+    out = eng.set_widget("Count", 8)                # must succeed (not poisoned)
+    assert any(o["text"] == "Count=8 Color=red" for o in out["outputs"])

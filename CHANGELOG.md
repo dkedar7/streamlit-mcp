@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 (2026-06-25)
+
+- **Fix:** a failed `set_widget` no longer poisons a long-lived MCP session (#10). Setting a
+  selectbox/radio/multiselect to an option that isn't offered is now rejected up front with a
+  clear error (it lists the valid options) **before** any state changes — previously the bad
+  value was left pending in the AppTest runtime, so every later `set_widget`/`click` on any
+  widget re-raised the stale error and the failing call could silently apply its own mutation.
+  Any other failed run is now rolled back to the prior value so the session stays usable, and
+  the error is attributed to the call that caused it.
+
 ## 0.2.0 (2026-06-25)
 
 - **Bearer auth is now enforced on HTTP/SSE** (#7). `serve --transport http|sse --bearer-token
