@@ -156,8 +156,23 @@ class AppTestRuntime:
         kind, el = self._find(identifier)
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
-        self._set(kind, el, self._coerce(kind, value))
-        self.at.run()
+        coerced = self._coerce(kind, value)
+        # Reject an out-of-range choice BEFORE writing it: an invalid option otherwise
+        # raises inside at.run(), and the bad value — left pending in AppTest — poisons
+        # every later set_widget/click for the whole session (origin: dogfood #10).
+        self._validate_choice(kind, el, coerced)
+        prior = getattr(el, "value", None)
+        self._set(kind, el, coerced)
+        try:
+            self.at.run()
+        except Exception as e:
+            # Any other failed run() also leaves bad pending state. Roll back to the prior
+            # value and re-run so the session stays usable, and attribute the failure to
+            # THIS call rather than letting it leak into the next one.
+            self._rollback(identifier, prior)
+            raise RuntimeError_(
+                f"setting {identifier!r} to {value!r} failed and was rolled back: {e}"
+            ) from e
 
     def click(self, identifier: str) -> None:
         kind, el = self._find(identifier)
@@ -167,6 +182,36 @@ class AppTestRuntime:
         self.at.run()
 
     # ----------------------------------------------------------------- helpers
+    @staticmethod
+    def _validate_choice(kind: str, el, value: Any) -> None:
+        """Reject a selectbox/radio/multiselect value that isn't an offered option, before
+        it is written to AppTest. Skipped when the widget exposes no options."""
+        options = list(getattr(el, "options", []) or [])
+        if not options:
+            return
+        if kind in ("selectbox", "radio"):
+            if value not in options:
+                raise RuntimeError_(
+                    f"{value!r} is not a valid option for {kind}; choose one of {options}"
+                )
+        elif kind == "multiselect":
+            values = value if isinstance(value, list) else [value]
+            invalid = [v for v in values if v not in options]
+            if invalid:
+                raise RuntimeError_(
+                    f"{invalid!r} are not valid options for multiselect; choose from {options}"
+                )
+
+    def _rollback(self, identifier: str, prior: Any) -> None:
+        """Best-effort restore of a widget's prior value + re-run, so one failed set doesn't
+        brick the session. Restore failures are swallowed — the original error still raises."""
+        try:
+            kind, el = self._find(identifier)
+            self._set(kind, el, prior)
+            self.at.run()
+        except Exception:
+            pass
+
     def _find(self, identifier: str):
         self._ensure()
         # match on key first, then label
