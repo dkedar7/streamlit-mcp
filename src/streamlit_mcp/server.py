@@ -8,7 +8,6 @@ plan's deferred open question; the isolation machinery itself is complete and te
 
 from __future__ import annotations
 
-import sys
 from typing import Any, Optional
 
 from fastmcp import FastMCP
@@ -32,6 +31,22 @@ TOOL_NAMES = (
 )
 
 VALID_TRANSPORTS = ("stdio", "http", "sse")
+LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def bearer_auth(guard: Optional[Any]):
+    """Build a FastMCP token verifier from a guard's bearer token, or None if unset.
+
+    When a token is configured it is REQUIRED on every HTTP/SSE request: FastMCP's auth
+    middleware returns 401 for a missing or wrong ``Authorization: Bearer <token>``. stdio
+    is local and unauthenticated, so this is only wired up for the HTTP/SSE transports.
+    """
+    token = getattr(guard, "bearer_token", None)
+    if not token:
+        return None
+    from fastmcp.server.auth import StaticTokenVerifier
+
+    return StaticTokenVerifier({token: {"client_id": "streamlit-mcp", "scopes": []}})
 
 
 def core_tool_handlers(engine: Engine) -> dict:
@@ -64,9 +79,14 @@ def _validate_transport(transport: str) -> str:
     return transport
 
 
-def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "streamlit-mcp"):
-    """Construct a FastMCP server exposing the core tools (+ any semantic tools)."""
-    mcp = FastMCP(app_name)
+def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "streamlit-mcp",
+                 auth: Optional[Any] = None):
+    """Construct a FastMCP server exposing the core tools (+ any semantic tools).
+
+    ``auth`` is a FastMCP auth provider (see ``bearer_auth``); when set, the HTTP/SSE
+    transport requires a valid bearer token. It has no effect on stdio.
+    """
+    mcp = FastMCP(app_name, auth=auth)
     sessions = SessionManager(lambda: AppTestRuntime(app_path))
 
     def engine_for(ctx: Any) -> Engine:
@@ -146,24 +166,18 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000, guard: Optional[Any] = None) -> None:
     """Build and run the server on the chosen transport (blocking)."""
     _validate_transport(transport)
-    if transport in ("http", "sse") and host not in ("127.0.0.1", "::1", "localhost"):
-        # Bearer auth is not yet enforced on the transport (see CHANGELOG), so refuse to
-        # expose an unauthenticated server beyond loopback. Fail closed.
-        raise ValueError(
-            f"Refusing to serve {transport} on non-loopback host {host!r}: HTTP bearer auth "
-            "is not yet enforced. Bind to 127.0.0.1 for local agents, or use stdio."
-        )
-    if transport in ("http", "sse") and getattr(guard, "bearer_token", None):
-        # The token primitive is implemented but not yet wired to the transport, so a
-        # supplied bearer token does NOT gate requests. Warn loudly rather than imply a
-        # protection we don't deliver (see CHANGELOG known issues); never silently accept it.
-        print(
-            "WARNING: a bearer token is set but bearer auth is NOT yet enforced on the "
-            f"{transport} transport — this server accepts unauthenticated requests. Treat "
-            "127.0.0.1 as the only trust boundary until enforcement lands.",
-            file=sys.stderr,
-        )
-    mcp = build_server(app_path, guard=guard)
+    auth = None
+    if transport in ("http", "sse"):
+        auth = bearer_auth(guard)
+        if auth is None and host not in LOOPBACK_HOSTS:
+            # No token => requests are unauthenticated. Refuse to expose that beyond
+            # loopback; bind 127.0.0.1, or pass a bearer token to gate a public host.
+            raise ValueError(
+                f"Refusing to serve {transport} on non-loopback host {host!r} without a "
+                "bearer token: requests would be unauthenticated. Pass --bearer-token to bind "
+                "a non-loopback host, or use 127.0.0.1 / stdio."
+            )
+    mcp = build_server(app_path, guard=guard, auth=auth)
     if transport == "stdio":
         mcp.run()
     else:

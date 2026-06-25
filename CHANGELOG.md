@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (2026-06-25)
+
+- **Bearer auth is now enforced on HTTP/SSE** (#7). `serve --transport http|sse --bearer-token
+  <T>` wires a FastMCP token verifier, so every request must carry `Authorization: Bearer <T>`
+  — a missing or wrong token gets **401** before any tool runs. stdio stays local/unauthenticated.
+  - Non-loopback hosts are now allowed **when a token is set** (auth gates access); without a
+    token, `serve` still refuses a non-loopback host (fail closed).
+  - Removes the 0.1.2 "token is set but not enforced" startup warning — it's no longer true.
+- **CI:** bump `actions/checkout` (v4→v7) and `astral-sh/setup-uv` (v5→v7) to clear the Node-20
+  deprecation (#8).
+
 ## 0.1.2 (2026-06-24)
 
 - **Fix (security UX):** `serve --transport http/sse` now prints a prominent stderr warning
