@@ -222,3 +222,43 @@ def test_engine_set_widget_invalid_option_keeps_session_usable():
         eng.set_widget("Color", "purple")
     out = eng.set_widget("Count", 8)                # must succeed (not poisoned)
     assert any(o["text"] == "Count=8 Color=red" for o in out["outputs"])
+
+
+# --- 0.2.2 #12: out-of-range number/slider/date is rejected, not silently reverted ---
+RANGE_APP = (
+    "import streamlit as st, datetime\n"
+    "n = st.number_input('Count', min_value=0, max_value=10, value=1)\n"
+    "s = st.slider('Level', 0, 100, 50)\n"
+    "r = st.slider('Range', 0, 100, (20, 40))\n"
+    "w = st.date_input('When', value=datetime.date(2026, 6, 1),\n"
+    "                  min_value=datetime.date(2026, 1, 1), max_value=datetime.date(2026, 12, 31))\n"
+    "st.markdown(f'Count={n} Level={s} Range={r} When={w}')\n"
+)
+
+
+def test_out_of_range_number_rejected_and_prior_value_preserved():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=RANGE_APP)
+    rt.run()
+    rt.set_widget("Count", 5)                        # valid
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Count", 999)                 # above max 10
+    # the prior valid value (5) must survive — not silently reverted to the default (1)
+    assert "Count=5 " in _markdown(rt)[0]
+    rt.set_widget("Count", 0)                        # boundary (min) is allowed
+    assert "Count=0 " in _markdown(rt)[0]
+
+
+def test_out_of_range_slider_and_date_rejected():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=RANGE_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Level", -50)                 # below min 0
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Range", [20, 150])           # range slider: 150 above max 100
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("When", "2030-01-01")         # past max date
+    rt.set_widget("Level", 70)                       # valid still works
+    rt.set_widget("When", "2026-07-01")
+    assert "Level=70" in _markdown(rt)[0] and "When=2026-07-01" in _markdown(rt)[0]

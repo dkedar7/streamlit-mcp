@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 (2026-06-26)
+
+- **Fix:** an out-of-range `number_input`/`slider`/`date_input` `set_widget` is now rejected up
+  front with a clear error, instead of silently reverting the widget to its default and reporting
+  success (#12). 0.2.1 made *option* widgets atomic; range-constrained widgets fell through both
+  safety nets because AppTest doesn't raise on an out-of-range value — it resets to the default —
+  so a bad value reported `isError=False` while discarding the prior valid value. `set_widget` now
+  range-checks against the widget's `min`/`max` before writing, matching the option path.
+
 ## 0.2.1 (2026-06-25)
 
 - **Fix:** a failed `set_widget` no longer poisons a long-lived MCP session (#10). Setting a

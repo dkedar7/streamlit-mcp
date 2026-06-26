@@ -157,10 +157,12 @@ class AppTestRuntime:
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
         coerced = self._coerce(kind, value)
-        # Reject an out-of-range choice BEFORE writing it: an invalid option otherwise
-        # raises inside at.run(), and the bad value — left pending in AppTest — poisons
-        # every later set_widget/click for the whole session (origin: dogfood #10).
+        # Reject a bad value BEFORE writing it. An invalid *option* raises inside at.run()
+        # and the pending bad value poisons every later call (#10); an out-of-range *number/
+        # slider/date* does the opposite — AppTest silently resets it to the widget default
+        # and run() does NOT raise, so it must be caught up front too (#12).
         self._validate_choice(kind, el, coerced)
+        self._validate_range(kind, el, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
@@ -201,6 +203,26 @@ class AppTestRuntime:
                 raise RuntimeError_(
                     f"{invalid!r} are not valid options for multiselect; choose from {options}"
                 )
+
+    @staticmethod
+    def _validate_range(kind: str, el, value: Any) -> None:
+        """Reject a number_input/slider/date_input value outside the widget's [min, max]
+        before it is written. AppTest silently resets an out-of-range value to the default
+        (run() does not raise), so the rollback net never fires — it must be caught up front."""
+        if kind not in ("number_input", "slider", "date_input"):
+            return
+        lo, hi = getattr(el, "min", None), getattr(el, "max", None)
+        if lo is None and hi is None:
+            return
+        for v in (value if isinstance(value, (list, tuple)) else (value,)):
+            try:
+                below, above = (lo is not None and v < lo), (hi is not None and v > hi)
+            except TypeError:
+                return  # value not comparable to the bounds — leave it to _coerce/AppTest
+            if below:
+                raise RuntimeError_(f"{v!r} is out of range for {kind}: minimum is {lo!r}")
+            if above:
+                raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
 
     def _rollback(self, identifier: str, prior: Any) -> None:
         """Best-effort restore of a widget's prior value + re-run, so one failed set doesn't
