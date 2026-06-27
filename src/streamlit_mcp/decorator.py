@@ -32,6 +32,16 @@ class SemanticToolSpec:
 _REGISTRY: dict[str, SemanticToolSpec] = {}
 
 
+def _origin(fn: Callable) -> tuple:
+    """Identify a function by where it's defined, so the SAME decorated function re-running
+    (the app module is executed once per session) is recognized as a re-registration rather
+    than a name collision with a different tool."""
+    code = getattr(fn, "__code__", None)
+    return (getattr(fn, "__qualname__", getattr(fn, "__name__", "")),
+            getattr(code, "co_filename", None),
+            getattr(code, "co_firstlineno", None))
+
+
 def mcp_tool(func: Optional[Callable] = None, *, name: Optional[str] = None,
              description: Optional[str] = None):
     """Register ``func`` as a semantic MCP tool. Usable bare or with arguments::
@@ -47,7 +57,10 @@ def mcp_tool(func: Optional[Callable] = None, *, name: Optional[str] = None,
         tool_name = name or fn.__name__
         if tool_name in RESERVED_NAMES:
             raise ValueError(f"semantic tool name {tool_name!r} collides with a core tool")
-        if tool_name in _REGISTRY:
+        existing = _REGISTRY.get(tool_name)
+        if existing is not None:
+            if _origin(existing.func) == _origin(fn):
+                return fn  # same tool re-registered (app module ran again) — idempotent
             raise ValueError(f"semantic tool name {tool_name!r} is already registered")
         _REGISTRY[tool_name] = SemanticToolSpec(
             name=tool_name,

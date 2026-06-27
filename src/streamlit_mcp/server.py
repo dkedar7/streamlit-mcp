@@ -162,6 +162,19 @@ def _register_semantic_tools(mcp) -> None:
         mcp.tool(spec.func, name=spec.name, description=spec.description)
 
 
+def _load_app_semantic_tools(app_path: str) -> None:
+    """Run the served app once so any ``@mcp_tool`` it defines registers BEFORE we build the
+    server's tool list. The decorator only fires when the app module executes, and per-client
+    sessions run it lazily — too late for ``build_server``/``_register_semantic_tools``. This
+    makes the intuitive placement (decorate in your app file) actually expose the tool over the
+    documented ``serve`` entrypoint. Best-effort: a broken app surfaces its error per session,
+    so don't block serve startup here. (Re-registration on later session runs is idempotent.)"""
+    try:
+        AppTestRuntime(app_path).run()
+    except Exception:
+        pass
+
+
 def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000, guard: Optional[Any] = None) -> None:
     """Build and run the server on the chosen transport (blocking)."""
@@ -177,6 +190,7 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
                 "bearer token: requests would be unauthenticated. Pass --bearer-token to bind "
                 "a non-loopback host, or use 127.0.0.1 / stdio."
             )
+    _load_app_semantic_tools(app_path)
     mcp = build_server(app_path, guard=guard, auth=auth)
     if transport == "stdio":
         mcp.run()

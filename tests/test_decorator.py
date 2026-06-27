@@ -13,6 +13,7 @@ from streamlit_mcp.decorator import (
 )
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
 
 
 @pytest.fixture(autouse=True)
@@ -89,3 +90,37 @@ def test_build_server_with_semantic_tool_smoke():
     from streamlit_mcp.server import build_server
     mcp = build_server(APP)  # exercises the real mcp.tool(func, name=...) registration
     assert isinstance(mcp, FastMCP)
+
+
+# --- 0.2.3 #14: an @mcp_tool in the served app file is exposed through serve ---
+def test_app_file_tool_registered_by_warmup_and_exposed():
+    import asyncio
+    from streamlit_mcp.server import _load_app_semantic_tools, build_server
+    _load_app_semantic_tools(SEMANTIC_APP)         # what serve() does before build_server
+    assert "reset_all" in [t.name for t in registered_semantic_tools()]
+    mcp = build_server(SEMANTIC_APP)
+    names = sorted(t.name for t in asyncio.run(mcp.list_tools()))
+    assert "reset_all" in names                    # exposed alongside the widget tools
+
+
+def test_app_module_rerun_is_idempotent():
+    # Per-session runs re-execute the app's @mcp_tool; that must not raise or set at.exception
+    # (regression: previously every run after the first errored "already registered").
+    from streamlit_mcp.runtime import AppTestRuntime
+    AppTestRuntime(SEMANTIC_APP).run()             # first run registers
+    rt = AppTestRuntime(SEMANTIC_APP)
+    rt.run()                                       # second run must be clean
+    assert rt.snapshot().exception is None
+    assert len(registered_semantic_tools()) == 1   # still exactly one
+
+
+def test_same_name_different_function_still_collides():
+    # Idempotency is keyed on the function's origin, so a genuine duplicate name still raises.
+    @mcp_tool(name="dup")
+    def a():
+        pass
+
+    with pytest.raises(ValueError):
+        @mcp_tool(name="dup")
+        def b():
+            pass

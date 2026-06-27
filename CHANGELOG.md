@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3 (2026-06-27)
+
+- **Fix:** a `@mcp_tool` defined in the served app file is now actually exposed over `serve`
+  (#14). The decorator only fires when the app module executes, but sessions run the app
+  lazily — after the tool list was already built — so app-file semantic tools were silently
+  never registered. `serve` now loads the app once at startup before building the tool list,
+  and `@mcp_tool` registration is idempotent so per-session re-runs don't error. Documented
+  in the README.
+- **Fix:** `inspect` on a missing/unloadable app file now prints a clean one-line error and
+  exits 1, matching `call`, instead of dumping a raw Python traceback (#15).
+
 ## 0.2.2 (2026-06-26)
 
 - **Fix:** an out-of-range `number_input`/`slider`/`date_input` `set_widget` is now rejected up

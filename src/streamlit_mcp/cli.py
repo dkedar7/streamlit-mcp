@@ -101,8 +101,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
-    eng = _engine(args)
-    out = eng.get_layout() if args.layout else eng.list_widgets()
+    try:
+        eng = _engine(args)
+        out = eng.get_layout() if args.layout else eng.list_widgets()
+    except Exception as e:  # mirror cmd_call: a bad/missing app file -> clean message, exit 1
+        print(str(e), file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(out, indent=2, default=str))
         return 0

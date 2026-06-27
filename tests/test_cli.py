@@ -80,3 +80,17 @@ def test_serve_transport_choices():
     import pytest
     with pytest.raises(SystemExit):
         build_parser().parse_args(["serve", APP, "--transport", "pigeon"])
+
+
+# --- 0.2.3 #15: inspect on a missing/unloadable app prints a clean error, not a traceback ---
+def test_inspect_missing_file_clean_error(capsys):
+    rc = _run(["inspect", "does_not_exist_xyz.py"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and err.strip()   # a clean one-liner, no traceback
+
+
+def test_inspect_missing_file_json_clean_error(capsys):
+    rc = _run(["inspect", "does_not_exist_xyz.py", "--json"])
+    assert rc == 1
+    assert "Traceback" not in capsys.readouterr().err
