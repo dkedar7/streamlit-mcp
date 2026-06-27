@@ -61,6 +61,26 @@ Supported widgets (v1): text_input, number_input, text_area, slider, selectbox,
 multiselect, checkbox, radio, button, date_input. Unsupported elements (file_uploader,
 custom components, `st.chat`, fragments) are reported explicitly, never silently dropped.
 
+## Custom semantic tools
+
+Beyond the per-widget tools, expose a higher-level named action by decorating a function with
+`@mcp_tool` in your app file:
+
+```python
+import streamlit as st
+from streamlit_mcp import mcp_tool
+
+@mcp_tool
+def reset_all():
+    """Reset everything to defaults."""
+    return {"ok": True}
+
+st.text_input("Name")
+```
+
+`streamlit-mcp serve app.py` loads the app and exposes `reset_all` over MCP alongside the widget
+tools. The decorated function is called directly (it isn't a widget), so keep it self-contained.
+
 ## Human ↔ agent parity
 
 Everything an agent can do over MCP, a human can do via the CLI — both call the same
