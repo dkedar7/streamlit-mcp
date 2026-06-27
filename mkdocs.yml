@@ -1,0 +1,55 @@
+site_name: streamlit-mcp
+site_description: Serve any Streamlit app as an MCP server — agents drive it natively, no browser.
+site_url: https://dkedar7.github.io/streamlit-mcp/
+repo_url: https://github.com/dkedar7/streamlit-mcp
+repo_name: dkedar7/streamlit-mcp
+edit_uri: edit/main/docs/
+copyright: MIT-licensed · built with MkDocs Material
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Security: security.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/dkedar7/streamlit-mcp
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/streamlit-mcp/

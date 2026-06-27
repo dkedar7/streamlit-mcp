@@ -4,6 +4,8 @@
 set values, click buttons, and read the rendered output and `session_state` — natively,
 over MCP, with **no browser automation**.
 
+📖 **Documentation:** <https://dkedar7.github.io/streamlit-mcp/>
+
 ```bash
 pip install streamlit-mcp          # or run with no install via: uvx streamlit-mcp ...
 
@@ -98,6 +100,16 @@ surfaces.
   runs. A non-loopback host is allowed **only** with a token set; without one, `serve` binds
   `127.0.0.1` only and refuses a non-loopback host (fail closed). stdio is local and
   unauthenticated.
+
+## Known limitations
+
+- **Sessions are not disposed.** Per-client isolation works, but there is no session-close
+  hook, so a long-running HTTP server accumulates one runtime per client. stdio and
+  single-client use are unaffected.
+- **No concurrency locking.** Concurrent requests sharing one session are not serialized, and
+  `AppTest` is not known to be re-entrant — use one in-flight request per session for now.
+- **Output capture** covers headings / markdown / caption / text; `st.write`, `st.error`, and
+  similar are a planned coverage expansion.
 
 ## License
 

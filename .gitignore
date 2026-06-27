@@ -11,6 +11,9 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
+# Docs build output
+site/
+
 # Secrets / local
 .env
 *.local
