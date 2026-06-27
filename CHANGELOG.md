@@ -79,11 +79,15 @@ First release. Serve an existing Streamlit app as an MCP server, driven headless
 - Guardrails: read-only mode and widget allow-list (enforced on both CLI and MCP).
 
 ### Known issues / immediate follow-ups
+_Snapshot as of 0.1.0. Later releases resolved some of these (see the entries above); the
+README's "Known limitations" tracks what's still open today._
 - **HTTP bearer auth is not yet enforced on the transport.** The token primitive
   (`Guardrails.require_bearer`) is implemented and tested, but is not yet bound to the
   FastMCP HTTP/SSE request path. As a safeguard, `serve` refuses to start an HTTP/SSE
   server on a non-loopback host. Wiring `FastMCP(auth=...)` with a token verifier is the
   top follow-up before networked HTTP is supported.
+  **→ Resolved in 0.2.0** — bearer auth is enforced (401 without a valid token), and a
+  non-loopback host is allowed when a token is set.
 - **Sessions are not yet disposed.** Per-client isolation works, but there is no
   session-close hook, so long-running HTTP servers accumulate runtimes. Single-client and
   stdio use are unaffected.
