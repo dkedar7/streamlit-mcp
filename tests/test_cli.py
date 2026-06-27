@@ -20,6 +20,13 @@ def test_inspect_json_lists_widgets(capsys):
     assert len(out["widgets"]) == 10
 
 
+def test_inspect_missing_app_prints_clean_error(capsys):
+    assert _run(["inspect", "does_not_exist.py"]) == 1
+    captured = capsys.readouterr()
+    assert "File not found at" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_call_set_and_read_parity(capsys):
     """AE4: the CLI runs the same set->read sequence an agent does, same result."""
     assert _run(["call", APP, "--set", "Name=agent", "--read"]) == 0
