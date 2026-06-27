@@ -24,6 +24,22 @@ streamlit-mcp drives the app headlessly through Streamlit's own test runtime
 (`streamlit.testing.v1.AppTest`) and returns the **semantic element tree**, not pixels.
 Gradio and Dash already shipped native app-as-MCP; this fills the Streamlit gap.
 
+## Demo
+
+A normal Streamlit app (what a human opens in a browser) and what an agent does with the same
+app over MCP — `inspect` the widgets, `call` to set values / click / read the result. No browser:
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/demo-app.png" alt="A Streamlit signup form in a browser"></td>
+<td width="50%"><img src="docs/assets/agent-view.png" alt="The streamlit-mcp CLI introspecting and driving the app"></td>
+</tr>
+<tr>
+<td align="center"><em>The app a human runs</em></td>
+<td align="center"><em>What the agent sees over MCP</em></td>
+</tr>
+</table>
+
 ## Use it with an MCP client
 
 **Claude Desktop / Cursor** — add to your MCP config (`claude_desktop_config.json` or

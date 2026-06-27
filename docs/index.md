@@ -24,6 +24,17 @@ drives the app headlessly through Streamlit's own test runtime (`streamlit.testi
 and returns the **semantic element tree**, not pixels. Gradio and Dash already shipped native
 app-as-MCP; this fills the Streamlit gap.
 
+## See it
+
+A normal Streamlit app — the kind a human opens in a browser:
+
+![A Streamlit signup form running in a browser](assets/demo-app.png)
+
+The same app, driven by an agent over MCP — `inspect` to see the widgets, `call` to set values,
+click a button, and read the rendered result. No browser, no pixels:
+
+![The streamlit-mcp CLI introspecting and driving the app](assets/agent-view.png)
+
 ## Why it's nice
 
 - **No browser, no pixels.** Agents get a structured element tree and `session_state`, not
