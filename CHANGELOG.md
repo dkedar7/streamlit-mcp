@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 (2026-06-28)
+
+- **New: `streamlit_mcp.live`** — opt-in live human-in-the-loop sync. Wrap your widgets in
+  `with live(name, defaults={...}):` and an agent's edits over MCP appear in a watching browser
+  live (no manual refresh, no browser automation). It bridges Streamlit's isolated sessions
+  through a shared, versioned store the app re-reads — re-seeding widget `session_state` before
+  widgets are created, publishing local edits on exit, and polling via `st.fragment(run_every=...)`
+  in a live browser (skipped under headless AppTest). Ships a `FileStore` (atomic writes) by
+  default and a `Store` protocol so a custom backend (e.g. Redis) can be passed for multi-node.
+  Purely app-side — no new MCP tools, no engine/server changes. See the docs "Live /
+  human-in-the-loop" page and `examples/live_app.py`.
+
 ## 0.2.3 (2026-06-27)
 
 - **Fix:** a `@mcp_tool` defined in the served app file is now actually exposed over `serve`

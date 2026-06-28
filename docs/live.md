@@ -5,76 +5,83 @@ watching `streamlit run` in a browser normally doesn't see those edits, because 
 sessions are isolated** (each connection has its own `session_state`). So "the human watches the
 agent's edits appear live" isn't a connection trick — it needs **shared state the app re-reads**.
 
-Here's a small pattern that does exactly that. An agent edits over MCP from one process; a browser
-updates live in another — no manual refresh, and no browser automation:
+`streamlit_mcp.live` packages that in one `with` block. An agent edits over MCP from one process;
+a browser updates live in another — no manual refresh, and no browser automation:
 
 ![A browser updating live as an agent edits the app over MCP](assets/live-demo.gif)
 
-## How it works
+## Opt in with one `with` block
 
-1. **A shared store is the single source of truth.** The app keeps its state in a JSON file (use
-   Redis or a DB for multi-node) and renders from it. Each write bumps a **version**.
-2. **The agent's writes land in the store.** `streamlit-mcp serve` runs the same app via `AppTest`;
-   when the agent calls `set_widget`/`click`, the script reruns and persists to the store —
-   the *existing* tools, no new API.
-3. **The browser polls and reruns.** `st.fragment(run_every="1s")` re-reads the version; when it
-   changed (because the agent wrote), it calls `st.rerun(scope="app")`. On rerun, the app re-seeds
-   its widgets from the store **at the top of the script** (the one place Streamlit lets you
-   overwrite a widget's `session_state`), so the new values show up.
+```python
+import streamlit as st
+from streamlit_mcp.live import live
 
-The version field is what prevents an echo loop: the app only re-seeds when the store changed
-externally, and only writes when a widget actually changed locally.
+with live("signup", defaults={"name": "Ada", "plan": "Free", "created": False}):
+    st.text_input("Name", key="name")
+    st.selectbox("Plan", ["Free", "Pro", "Team"], key="plan")
+    if st.button("Create account"):
+        st.session_state["created"] = True
+    if st.session_state["created"]:
+        st.subheader(f"Welcome, {st.session_state['name']}!")
+```
+
+- `defaults` declares the synced `session_state` keys and their initial values. Synced widgets
+  use a matching `key=`.
+- **Action buttons** aren't persistent widget state, so represent them as a `defaults` flag the app
+  sets (e.g. `created`).
+- Pass `run_every=` (default `"1s"`) to tune how often the browser polls, or `store=` to use a
+  custom backend (see below).
 
 ## Run it
 
-Point both at the same file:
+Point both at the same file (the `name` you pass to `live(...)` is what links them):
 
 ```bash
-# 1) the human's browser
-streamlit run examples/live_app.py
+streamlit run examples/live_app.py            # the human's browser
+streamlit-mcp serve examples/live_app.py      # the agent, over MCP
 
-# 2) the agent, over MCP (or from the CLI, same engine)
-streamlit-mcp serve examples/live_app.py
-# ...or drive it directly to see the browser update:
+# ...or drive it directly and watch the browser update:
 streamlit-mcp call examples/live_app.py --set "Name=Grace" --set "Plan=Pro" \
-    --set "Years of experience=12" --click "Create account" --read
+    --click "Create account" --read
 ```
 
-The browser running step 1 updates within a second of the agent's edit in step 2.
+The browser running `streamlit run` updates within `run_every` of the agent's edit. The full
+example is [`examples/live_app.py`](https://github.com/dkedar7/streamlit-mcp/blob/main/examples/live_app.py).
 
-## The app
+## A custom store (multi-node)
 
-The full example is [`examples/live_app.py`](https://github.com/dkedar7/streamlit-mcp/blob/main/examples/live_app.py).
-The load-bearing parts:
+The default is a local JSON file (one machine). For multiple servers, pass any object with
+`load() -> (version, fields)` and `save(fields, version)`:
 
 ```python
-store_v, store_fields = load()
+from streamlit_mcp.live import live, Store  # Store is a typing Protocol
 
-# Adopt an external change (agent / another browser) BEFORE any widget is created.
-if st.session_state.get("_v") != store_v:
-    for k in FIELDS:
-        st.session_state[k] = store_fields[k]
-    st.session_state["_v"] = store_v
+class RedisStore:           # sketch — wire up your own client
+    def load(self): ...
+    def save(self, fields, version): ...
 
-name = st.text_input("Name", key="name")
-# ...other widgets...
-
-# A local edit (human or the agent's AppTest run) publishes a new version.
-cur = {"name": name, ...}
-if cur != store_fields:
-    save(cur, store_v + 1)
-    st.session_state["_v"] = store_v + 1
-
-@st.fragment(run_every="1s")
-def _live():
-    v, _ = load()
-    if v != st.session_state.get("_v"):
-        st.rerun(scope="app")   # adopt the agent's edit
-_live()
+with live("signup", defaults={...}, store=RedisStore()):
+    ...
 ```
+
+## Under the hood
+
+`live(...)` is a small context manager around the existing tools — no new MCP surface:
+
+1. **A versioned store is the source of truth.** On `__enter__`, it re-seeds the synced
+   `session_state` keys from the store **before any widget is created** (the only point Streamlit
+   lets you overwrite a widget's value), but only when the store changed externally.
+2. **Edits publish a new version.** On `__exit__`, if a synced widget changed (the human typed, or
+   the agent's `set_widget`/`click` reran the app), it writes the new values to the store with
+   `version + 1`. The version is what prevents an echo loop.
+3. **The browser polls and adopts.** In a live browser session it installs
+   `st.fragment(run_every=...)` that re-reads the version and `st.rerun(scope="app")`s when it
+   changed. (Under headless AppTest — the agent, or tests — the poll is skipped; there's no browser
+   to refresh.)
 
 ## Caveats
 
-- It's a **pattern, not a built-in** — the app opts in by reading/writing the shared store.
-- A **file store** is fine for one machine; use a shared store (Redis/DB) across servers.
-- It's last-writer-wins on a coarse version; fine for human-in-the-loop, not a concurrent CRDT.
+- A **file store** is fine for one machine; use a shared `Store` (Redis/DB) across servers.
+- It's **last-writer-wins** on a coarse version (atomic writes prevent torn reads, not lost
+  concurrent updates) — fine for human-in-the-loop, not a CRDT.
+- Polling reruns the script every `run_every` — tune it for your app.
