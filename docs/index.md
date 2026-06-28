@@ -35,6 +35,11 @@ click a button, and read the rendered result. No browser, no pixels:
 
 ![The streamlit-mcp CLI introspecting and driving the app](assets/agent-view.png)
 
+…and a human can watch the agent work **live** in their browser — no refresh, no browser automation
+([how](live.md)):
+
+![A browser updating live as an agent edits the app over MCP](assets/live-demo.gif)
+
 ## Why it's nice
 
 - **No browser, no pixels.** Agents get a structured element tree and `session_state`, not
