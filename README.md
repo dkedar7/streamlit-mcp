@@ -40,6 +40,9 @@ app over MCP — `inspect` the widgets, `call` to set values / click / read the 
 </tr>
 </table>
 
+A human can also watch the agent work **live** in their browser — no refresh, no browser automation.
+See the [live / human-in-the-loop recipe](https://dkedar7.github.io/streamlit-mcp/live/).
+
 ## Use it with an MCP client
 
 **Claude Desktop / Cursor** — add to your MCP config (`claude_desktop_config.json` or

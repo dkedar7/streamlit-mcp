@@ -34,6 +34,7 @@ theme:
 nav:
   - Home: index.md
   - Usage: usage.md
+  - Live / human-in-the-loop: live.md
   - Security: security.md
   - Changelog: changelog.md
 
