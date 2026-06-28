@@ -5,9 +5,12 @@ interface); widgets auto-map to MCP tools, and a human-first CLI exercises the s
 engine an agent uses (parity).
 """
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 # Public API
+# Live human-in-the-loop sync lives in the `streamlit_mcp.live` submodule (import it directly:
+# `from streamlit_mcp.live import live`). It is not re-exported here so `import streamlit_mcp`
+# stays cheap — `live` imports streamlit eagerly, whereas the core path defers it.
 from .decorator import mcp_tool  # noqa: E402
 from .engine import Engine, PermissionDenied  # noqa: E402
 from .guardrails import Guardrails  # noqa: E402
