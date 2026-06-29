@@ -20,6 +20,7 @@ widgets must use matching ``key=``\\ s. Run ``streamlit run app.py`` (the human)
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import tempfile
@@ -30,6 +31,32 @@ import streamlit as st
 
 # Internal session_state key holding the store version this session has adopted.
 _VKEY = "_smcp_live_v"
+
+
+def _encode(o: Any) -> dict:
+    """JSON ``default`` for values Streamlit widgets produce that JSON can't (date/datetime/time).
+    Encoded to a tagged form so :func:`_decode` can restore the real object on the way back."""
+    if isinstance(o, _dt.datetime):  # check before date (datetime subclasses date)
+        return {"__dt__": o.isoformat()}
+    if isinstance(o, _dt.date):
+        return {"__date__": o.isoformat()}
+    if isinstance(o, _dt.time):
+        return {"__time__": o.isoformat()}
+    raise TypeError(
+        f"live() can't sync a value of type {type(o).__name__!r} through the default FileStore "
+        "(JSON values plus date/datetime/time only). Use a JSON-native value or pass a custom store=."
+    )
+
+
+def _decode(d: dict) -> Any:
+    """``object_hook`` mirror of :func:`_encode`: restore tagged date/datetime/time values."""
+    if "__date__" in d:
+        return _dt.date.fromisoformat(d["__date__"])
+    if "__dt__" in d:
+        return _dt.datetime.fromisoformat(d["__dt__"])
+    if "__time__" in d:
+        return _dt.time.fromisoformat(d["__time__"])
+    return d
 
 
 @runtime_checkable
@@ -57,13 +84,13 @@ class FileStore:
 
     def load(self) -> tuple[int, dict]:
         try:
-            d = json.loads(self.path.read_text(encoding="utf-8"))
+            d = json.loads(self.path.read_text(encoding="utf-8"), object_hook=_decode)
             return int(d.get("v", 0)), dict(d.get("fields", {}))
         except (OSError, ValueError):
             return 0, {}
 
     def save(self, fields: dict, version: int) -> None:
-        payload = json.dumps({"v": int(version), "fields": fields})
+        payload = json.dumps({"v": int(version), "fields": fields}, default=_encode)
         tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
         tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, self.path)  # atomic on the same filesystem

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1 (2026-06-29)
+
+- **Fix:** `live()` now syncs `date_input`/`time_input` values. `FileStore` used a plain
+  `json.dumps`, so a synced `datetime.date` (a documented supported widget) raised
+  `TypeError: Object of type date is not JSON serializable` — crashing the rerun, never
+  persisting the store, yet reporting success. `FileStore` now uses a symmetric
+  date/datetime/time codec so those values round-trip back as real objects (#23).
+- **Fix (parity):** `@mcp_tool` semantic tools are now reachable from the CLI, restoring the
+  "Human ↔ agent parity" guarantee. `inspect` lists them (text, `--json`, `--layout`) and
+  `call --tool <name> [--arg k=v ...]` invokes one — both via the same registry the MCP server
+  uses. Previously they were callable over MCP but invisible/uncallable from the CLI (#21).
+
 ## 0.3.0 (2026-06-28)
 
 - **New: `streamlit_mcp.live`** — opt-in live human-in-the-loop sync. Wrap your widgets in

@@ -66,6 +66,14 @@ st.text_input("Name")
 `streamlit-mcp serve app.py` loads the app and exposes `reset_all` over MCP alongside the widget
 tools. The decorated function is called directly (it isn't a widget), so keep it self-contained.
 
+The CLI reaches it too (human ↔ agent parity): `inspect` lists registered tools, and `call --tool`
+invokes one:
+
+```bash
+streamlit-mcp inspect app.py                 # ...lists reset_all under "tools:"
+streamlit-mcp call app.py --tool reset_all   # invoke it; --arg key=value passes arguments
+```
+
 ## Drive it from the terminal
 
 The CLI calls the same engine an agent uses over MCP, so behavior matches exactly:
