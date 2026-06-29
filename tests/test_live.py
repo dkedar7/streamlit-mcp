@@ -125,6 +125,29 @@ def test_live_date_input_persists_without_crash(tmp_path):
     assert fields2["when"] == datetime.date(2026, 12, 25)
 
 
+def test_live_app_with_columns_does_not_hang_under_apptest(tmp_path):
+    # Regression: the run_every poll must be skipped under AppTest (mocked runtime). With a
+    # st.columns layout it otherwise hung the headless run. Structure must still change.
+    sp = tmp_path / "store.json"
+    script = (
+        "import streamlit as st\n"
+        "from streamlit_mcp.live import live, FileStore\n"
+        f"with live('c', defaults={{'rows': 1, 'cols': 1}}, store=FileStore(r'{sp}')):\n"
+        "    rows = int(st.number_input('Rows', min_value=1, max_value=6, key='rows'))\n"
+        "    cols = int(st.number_input('Columns', min_value=1, max_value=3, key='cols'))\n"
+        "    columns = st.columns(cols)\n"
+        "    for i in range(rows):\n"
+        "        with columns[i % cols]:\n"
+        "            st.text_input(f'Field {i}', key=f'field_{i}')\n"
+    )
+    rt = AppTestRuntime(script=script)
+    rt.run()                                              # must not time out
+    rt.set_widget("Rows", 4)
+    rt.set_widget("Columns", 2)
+    ids = [w.key for w in rt.snapshot().widgets if (w.key or "").startswith("field_")]
+    assert len(ids) == 4                                  # agent grew the structure
+
+
 def test_live_adopts_external_date(tmp_path):
     sp = tmp_path / "store.json"
     FileStore(sp).save({"name": "Lin", "when": datetime.date(2030, 5, 6)}, 1)

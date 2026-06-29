@@ -35,6 +35,7 @@ nav:
   - Home: index.md
   - Usage: usage.md
   - Live / human-in-the-loop: live.md
+  - Dynamic / agent-driven layout: dynamic-layout.md
   - Security: security.md
   - Changelog: changelog.md
 

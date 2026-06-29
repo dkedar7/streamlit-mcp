@@ -137,12 +137,14 @@ class LiveSync:
         return False  # never suppress exceptions
 
     def _install_poll(self) -> None:
-        # The poll only matters in a live browser session. Under AppTest / bare mode — i.e. the
-        # agent driving over MCP, or tests — there's no browser to refresh, so skip it (this also
-        # avoids a run_every fragment hanging a headless run).
+        # The poll (a run_every fragment) only matters in a real browser session. Skip it under
+        # AppTest — the agent driving over MCP, or tests — where there's no browser to refresh and
+        # a run_every fragment can hang the headless run. AppTest mocks the runtime, so a genuine
+        # Runtime instance is the reliable signal: st.runtime.exists() is True under BOTH.
         try:
             import streamlit.runtime as _rt
-            if not _rt.exists():
+            from streamlit.runtime import Runtime
+            if not (_rt.exists() and isinstance(_rt.get_instance(), Runtime)):
                 return
         except Exception:
             return
