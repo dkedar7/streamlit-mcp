@@ -40,6 +40,9 @@ click a button, and read the rendered result. No browser, no pixels:
 
 ![A browser updating live as an agent edits the app over MCP](assets/live-demo.gif)
 
+The agent can even **add components and rearrange the layout** by driving state the app branches on
+([how](dynamic-layout.md)).
+
 ## Why it's nice
 
 - **No browser, no pixels.** Agents get a structured element tree and `session_state`, not

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2 (2026-06-29)
+
+- **Fix:** `live()`'s polling fragment is now reliably skipped under headless AppTest (the agent
+  driving over MCP, or tests). The previous `st.runtime.exists()` gate was `True` under AppTest
+  too, so the `run_every` fragment could install and intermittently hang a headless run for apps
+  using `st.columns`. AppTest mocks the runtime, so a genuine `Runtime` instance is now the gate;
+  the live browser still polls as before.
+- **Docs:** new "Dynamic / agent-driven layout" guide + `examples/dynamic_app.py` — the agent
+  adds components and rearranges the layout by driving state (the app's structure is a function of
+  state it controls), with the human watching live.
+
 ## 0.3.1 (2026-06-29)
 
 - **Fix:** `live()` now syncs `date_input`/`time_input` values. `FileStore` used a plain
