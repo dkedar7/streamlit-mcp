@@ -81,6 +81,8 @@ with live("signup", defaults={...}, store=RedisStore()):
 
 ## Caveats
 
+- Synced values may be any JSON-native type plus `date` / `datetime` / `time` (so `date_input`
+  and `time_input` work); other custom types need a custom `Store`.
 - A **file store** is fine for one machine; use a shared `Store` (Redis/DB) across servers.
 - It's **last-writer-wins** on a coarse version (atomic writes prevent torn reads, not lost
   concurrent updates) — fine for human-in-the-loop, not a CRDT.

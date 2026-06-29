@@ -14,6 +14,7 @@ import sys
 from typing import Any, Optional
 
 from . import __version__
+from .decorator import registered_semantic_tools
 from .engine import Engine
 from .guardrails import Guardrails
 from .runtime import AppTestRuntime
@@ -102,11 +103,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_inspect(args: argparse.Namespace) -> int:
     try:
-        eng = _engine(args)
+        eng = _engine(args)  # runs the app, which also registers any @mcp_tool it defines
         out = eng.get_layout() if args.layout else eng.list_widgets()
     except Exception as e:  # mirror cmd_call: a bad/missing app file -> clean message, exit 1
         print(str(e), file=sys.stderr)
         return 1
+    # Human<->agent parity: surface @mcp_tool semantic tools the agent sees over MCP.
+    tools = [{"name": s.name, "description": s.description} for s in registered_semantic_tools()]
+    if tools:
+        out["tools"] = tools
     if args.json:
         print(json.dumps(out, indent=2, default=str))
         return 0
@@ -126,10 +131,32 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             print("  unsupported:")
             for u in unsupported:
                 print(f"    {u['element']}: {u['reason']}")
+    if tools:
+        print("  tools:")
+        for t in tools:
+            print(f"    {t['name']:<14} {t['description']}")
     return 0
 
 
 def cmd_call(args: argparse.Namespace) -> int:
+    if args.tool:  # invoke a @mcp_tool semantic tool — the CLI counterpart of the MCP call
+        try:
+            _engine(args)  # runs the app, registering its @mcp_tool definitions
+            spec = next((s for s in registered_semantic_tools() if s.name == args.tool), None)
+            if spec is None:
+                names = [s.name for s in registered_semantic_tools()]
+                raise ValueError(f"no semantic tool named {args.tool!r}"
+                                 + (f"; available: {names}" if names else ""))
+            kwargs = dict(_split_assignment(a) for a in (args.arg or []))
+            result = spec.func(**kwargs)
+        except Exception as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(result if isinstance(result, str) else json.dumps(result, default=str))
+        return 0
     try:
         eng = _engine(args)
         for item in args.set or []:
@@ -192,6 +219,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_call.add_argument("app")
     p_call.add_argument("--set", action="append", help="identifier=value (repeatable)")
     p_call.add_argument("--click", action="append", help="button identifier (repeatable)")
+    p_call.add_argument("--tool", help="invoke a @mcp_tool semantic tool by name")
+    p_call.add_argument("--arg", action="append",
+                        help="key=value argument for --tool (repeatable)")
     p_call.add_argument("--read", action="store_true", help="print rendered output (default)")
     p_call.add_argument("--state", action="store_true", help="print session_state instead")
     p_call.add_argument("--json", action="store_true")

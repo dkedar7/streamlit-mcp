@@ -102,6 +102,8 @@ st.text_input("Name")
 
 `streamlit-mcp serve app.py` loads the app and exposes `reset_all` over MCP alongside the widget
 tools. The decorated function is called directly (it isn't a widget), so keep it self-contained.
+It's reachable from the CLI too (human ↔ agent parity): `streamlit-mcp inspect app.py` lists it and
+`streamlit-mcp call app.py --tool reset_all` invokes it.
 
 ## Human ↔ agent parity
 

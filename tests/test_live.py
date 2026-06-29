@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 
 from streamlit_mcp.live import FileStore, _default_store, live
@@ -78,3 +79,56 @@ def test_no_edit_does_not_churn_the_store(tmp_path):
 def test_live_factory_returns_context_manager():
     cm = live("x", defaults={"a": 1})
     assert hasattr(cm, "__enter__") and hasattr(cm, "__exit__")
+
+
+# --- 0.3.1 #23: date/datetime/time round-trip through FileStore (not str, not a crash) ---
+def test_filestore_roundtrips_date_types(tmp_path):
+    store = FileStore(tmp_path / "d.json")
+    fields = {
+        "when": datetime.date(2026, 12, 25),
+        "ts": datetime.datetime(2026, 1, 2, 3, 4, 5),
+        "at": datetime.time(9, 30),
+        "name": "Ada",
+    }
+    store.save(fields, 1)
+    v, got = store.load()
+    assert v == 1 and got == fields                      # equal AND same types
+    assert isinstance(got["when"], datetime.date) and not isinstance(got["when"], datetime.datetime)
+    assert isinstance(got["ts"], datetime.datetime) and isinstance(got["at"], datetime.time)
+
+
+def _date_app(store_path: str) -> str:
+    return (
+        "import datetime\n"
+        "import streamlit as st\n"
+        "from streamlit_mcp.live import live, FileStore\n"
+        f"with live('d', defaults={{'name': 'Ada', 'when': datetime.date(2026, 1, 1)}},\n"
+        f"          store=FileStore(r'{store_path}')):\n"
+        "    st.text_input('Name', key='name')\n"
+        "    st.date_input('Start date', key='when')\n"
+        "    st.markdown(f\"{st.session_state['name']} / {st.session_state['when']}\")\n"
+    )
+
+
+def test_live_date_input_persists_without_crash(tmp_path):
+    sp = tmp_path / "store.json"
+    rt = AppTestRuntime(script=_date_app(str(sp)))
+    rt.run()
+    rt.set_widget("Name", "Bob")                          # used to crash: date in defaults
+    assert rt.snapshot().exception is None
+    v, fields = FileStore(sp).load()
+    assert v >= 1 and fields["name"] == "Bob"
+    assert fields["when"] == datetime.date(2026, 1, 1)    # date preserved as a date
+
+    rt.set_widget("Start date", datetime.date(2026, 12, 25))
+    _, fields2 = FileStore(sp).load()
+    assert fields2["when"] == datetime.date(2026, 12, 25)
+
+
+def test_live_adopts_external_date(tmp_path):
+    sp = tmp_path / "store.json"
+    FileStore(sp).save({"name": "Lin", "when": datetime.date(2030, 5, 6)}, 1)
+    rt = AppTestRuntime(script=_date_app(str(sp)))
+    rt.run()
+    md = [o.text for o in rt.snapshot().outputs if o.kind == "markdown"]
+    assert any("Lin / 2030-05-06" in t for t in md)

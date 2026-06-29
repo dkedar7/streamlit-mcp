@@ -5,9 +5,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from streamlit_mcp.cli import _parse_value, _split_assignment, build_parser, main
+from streamlit_mcp.decorator import clear_registry
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry():
+    # The @mcp_tool registry is process-global; keep CLI tests from leaking into each other.
+    clear_registry()
+    yield
+    clear_registry()
 
 
 def _run(argv):
@@ -77,9 +89,37 @@ def test_split_assignment():
 
 def test_serve_transport_choices():
     # argparse rejects an invalid transport with SystemExit(2)
-    import pytest
     with pytest.raises(SystemExit):
         build_parser().parse_args(["serve", APP, "--transport", "pigeon"])
+
+
+# --- 0.3.1 #21: @mcp_tool semantic tools are reachable from the CLI (human<->agent parity) ---
+def test_inspect_lists_semantic_tool(capsys):
+    assert _run(["inspect", SEMANTIC_APP]) == 0
+    out = capsys.readouterr().out
+    assert "tools:" in out and "reset_all" in out
+
+
+def test_inspect_json_includes_tools(capsys):
+    assert _run(["inspect", SEMANTIC_APP, "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [t["name"] for t in data.get("tools", [])] == ["reset_all"]
+
+
+def test_call_invokes_semantic_tool(capsys):
+    assert _run(["call", SEMANTIC_APP, "--tool", "reset_all"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+def test_call_unknown_tool_errors(capsys):
+    assert _run(["call", SEMANTIC_APP, "--tool", "nope"]) == 1
+    assert "no semantic tool" in capsys.readouterr().err
+
+
+def test_inspect_without_tools_has_no_tools_section(capsys):
+    # an app with no @mcp_tool must not show a tools section (registry stays clean)
+    assert _run(["inspect", APP]) == 0
+    assert "tools:" not in capsys.readouterr().out
 
 
 # --- 0.2.3 #15: inspect on a missing/unloadable app prints a clean error, not a traceback ---
