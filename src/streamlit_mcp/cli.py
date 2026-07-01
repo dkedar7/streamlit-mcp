@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from . import __version__
 from .decorator import registered_semantic_tools
-from .engine import Engine
+from .engine import Engine, guard_semantic_tool
 from .guardrails import Guardrails
 from .runtime import AppTestRuntime
 
@@ -147,6 +147,7 @@ def cmd_call(args: argparse.Namespace) -> int:
                 names = [s.name for s in registered_semantic_tools()]
                 raise ValueError(f"no semantic tool named {args.tool!r}"
                                  + (f"; available: {names}" if names else ""))
+            guard_semantic_tool(build_guardrails(args), args.tool)  # read-only / allow-list gate
             kwargs = dict(_split_assignment(a) for a in (args.arg or []))
             result = spec.func(**kwargs)
         except Exception as e:

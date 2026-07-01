@@ -148,18 +148,33 @@ def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "st
         def get_state() -> dict:
             return engine_for(None).get_state()
 
-    _register_semantic_tools(mcp)
+    _register_semantic_tools(mcp, guard)
     return mcp
 
 
-def _register_semantic_tools(mcp) -> None:
-    """Register any @mcp_tool-decorated semantic tools (U7). No-op if none/absent."""
+def _register_semantic_tools(mcp, guard: Optional[Any] = None) -> None:
+    """Register any @mcp_tool-decorated semantic tools (U7). No-op if none/absent. Each is wrapped
+    so the read-only / allow-list guard covers it too (#26) — otherwise a state-changing action
+    would run despite --read-only."""
     try:
         from .decorator import registered_semantic_tools
     except Exception:
         return
     for spec in registered_semantic_tools():
-        mcp.tool(spec.func, name=spec.name, description=spec.description)
+        mcp.tool(_guarded_tool(spec, guard), name=spec.name, description=spec.description)
+
+
+def _guarded_tool(spec, guard):
+    import functools
+
+    from .engine import guard_semantic_tool
+
+    @functools.wraps(spec.func)  # preserves the signature so FastMCP builds the right schema
+    def wrapped(*args, **kwargs):
+        guard_semantic_tool(guard, spec.name)
+        return spec.func(*args, **kwargs)
+
+    return wrapped
 
 
 def _load_app_semantic_tools(app_path: str) -> None:

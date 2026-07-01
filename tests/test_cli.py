@@ -12,6 +12,7 @@ from streamlit_mcp.decorator import clear_registry
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
 SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
+RAISES_APP = str(Path(__file__).parent / "apps" / "raises_app.py")
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +121,34 @@ def test_inspect_without_tools_has_no_tools_section(capsys):
     # an app with no @mcp_tool must not show a tools section (registry stays clean)
     assert _run(["inspect", APP]) == 0
     assert "tools:" not in capsys.readouterr().out
+
+
+# --- 0.3.3 #26: read-only / allow-list gate `call --tool` ---
+def test_call_tool_blocked_read_only(capsys):
+    assert _run(["call", SEMANTIC_APP, "--read-only", "--tool", "reset_all"]) == 1
+    assert "read-only" in capsys.readouterr().err
+
+
+def test_call_tool_blocked_by_allow_list(capsys):
+    assert _run(["call", SEMANTIC_APP, "--allow", "Name", "--tool", "reset_all"]) == 1
+    assert "allow-list" in capsys.readouterr().err
+
+
+def test_call_tool_permitted_when_allow_listed(capsys):
+    assert _run(["call", SEMANTIC_APP, "--allow", "reset_all", "--tool", "reset_all"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+# --- 0.3.3 #27: an app exception must not corrupt stdout / --json ---
+def test_json_stays_clean_when_app_raises(capsys):
+    assert _run(["inspect", RAISES_APP, "--json"]) == 0
+    json.loads(capsys.readouterr().out)                     # valid JSON, no traceback on stdout
+
+
+def test_call_read_json_clean_and_surfaces_exception(capsys):
+    assert _run(["call", RAISES_APP, "--read", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)              # stdout is valid JSON
+    assert data.get("exception") and "kaboom" in data["exception"]
 
 
 # --- 0.2.3 #15: inspect on a missing/unloadable app prints a clean error, not a traceback ---

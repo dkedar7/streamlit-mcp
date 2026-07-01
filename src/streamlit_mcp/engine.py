@@ -24,6 +24,19 @@ class PermissionDenied(Exception):
     """Raised when a guard blocks a write or a disallowed widget."""
 
 
+def guard_semantic_tool(guard: Optional[Any], name: str) -> None:
+    """Read-only / allow-list gate for ``@mcp_tool`` semantic tools, so guardrails cover the
+    higher-level action surface too (origin: dogfood #26). Fail closed: since we can't know
+    whether a tool mutates, read-only blocks any tool, and an allow-list blocks a tool whose
+    name isn't listed (``--allow <tool-name>`` opts one back in)."""
+    if guard is None:
+        return
+    if hasattr(guard, "can_write") and not guard.can_write():
+        raise PermissionDenied("server is in read-only mode")
+    if hasattr(guard, "is_allowed") and not guard.is_allowed(name):
+        raise PermissionDenied(f"tool {name!r} is not in the allow-list")
+
+
 class Engine:
     def __init__(self, runtime: Runtime, guard: Optional[Any] = None,
                  app_path: Optional[str] = None):

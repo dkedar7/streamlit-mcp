@@ -20,8 +20,12 @@ streamlit-mcp serve app.py --transport http --host 0.0.0.0 --bearer-token "$TOKE
 ## Guardrails
 
 `--read-only` blocks state-changing tools (`set_widget`/`click`), and `--allow <id>` restricts
-which widgets can be seen or set. Both are enforced **identically** on the CLI and over MCP,
-because both surfaces dispatch to the same engine.
+which widgets can be seen or set. Both are enforced **identically** on the CLI and over MCP.
+
+They also cover **`@mcp_tool` semantic tools**, and fail closed: because streamlit-mcp can't know
+whether a given tool mutates, `--read-only` blocks *any* semantic tool, and `--allow` gates tool
+**names** too — `--allow reset_all` opts one specific tool back in. So `--read-only` really is a
+look-but-don't-touch surface, including the higher-level action layer.
 
 ## Known limitations
 

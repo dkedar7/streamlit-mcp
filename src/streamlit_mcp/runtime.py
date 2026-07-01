@@ -10,9 +10,25 @@ click buttons (each triggers a rerun), and read the rendered element tree + sess
 
 from __future__ import annotations
 
+import contextlib
 import datetime
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr():
+    """Keep the app's own output off stdout during a run. Streamlit prints an uncaught-exception
+    traceback (and any ``print()`` the app makes) to stdout; stdout must stay clean for the CLI's
+    ``--json`` and the stdio MCP JSON-RPC channel, so redirect it to stderr for the duration. The
+    error itself is still captured in the snapshot's ``exception`` field (origin: dogfood #27)."""
+    saved = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = saved
 
 # The ten widget kinds supported in v1 (origin R10). Order is display order.
 SUPPORTED_KINDS = (
@@ -91,8 +107,15 @@ class AppTestRuntime:
             raise ValueError("provide app_path or script")
         self._started = False
 
+    def _run_script(self) -> None:
+        """Run the app, keeping its stdout output (tracebacks, print) off our stdout. Uses a
+        generous timeout — AppTest's 3s default spuriously trips for a slow app or a loaded CI
+        box; a real app run finishes in well under a second."""
+        with _stdout_to_stderr():
+            self.at.run(timeout=30)
+
     def run(self) -> None:
-        self.at.run()
+        self._run_script()
         self._started = True
 
     def _ensure(self) -> None:
@@ -166,7 +189,7 @@ class AppTestRuntime:
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
-            self.at.run()
+            self._run_script()
         except Exception as e:
             # Any other failed run() also leaves bad pending state. Roll back to the prior
             # value and re-run so the session stays usable, and attribute the failure to
@@ -181,7 +204,7 @@ class AppTestRuntime:
         if kind != "button":
             raise RuntimeError_(f"{identifier!r} is not a button")
         el.click()
-        self.at.run()
+        self._run_script()
 
     # ----------------------------------------------------------------- helpers
     @staticmethod
@@ -230,7 +253,7 @@ class AppTestRuntime:
         try:
             kind, el = self._find(identifier)
             self._set(kind, el, prior)
-            self.at.run()
+            self._run_script()
         except Exception:
             pass
 

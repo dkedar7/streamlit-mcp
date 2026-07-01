@@ -17,6 +17,39 @@ from streamlit_mcp.server import (
 )
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
+
+
+# --- 0.3.3 #26: read-only blocks a @mcp_tool over MCP; the tool is still exposed with its schema ---
+def test_semantic_tool_blocked_read_only_over_mcp():
+    import asyncio
+
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError
+
+    from streamlit_mcp.decorator import clear_registry
+    from streamlit_mcp.guardrails import Guardrails
+    from streamlit_mcp.server import _load_app_semantic_tools
+
+    async def run():
+        clear_registry()
+        _load_app_semantic_tools(SEMANTIC_APP)
+        async with Client(build_server(SEMANTIC_APP)) as c:  # no guard -> exposed + runs
+            names = {t.name for t in await c.list_tools()}
+            assert "reset_all" in names
+            ok = await c.call_tool("reset_all", {})
+            assert "ok" in ok.content[0].text
+        clear_registry()
+        _load_app_semantic_tools(SEMANTIC_APP)
+        async with Client(build_server(SEMANTIC_APP, guard=Guardrails(read_only=True))) as c:
+            with pytest.raises(ToolError, match="read-only"):
+                await c.call_tool("reset_all", {})
+
+    try:
+        asyncio.run(run())
+    finally:
+        from streamlit_mcp.decorator import clear_registry as _cr
+        _cr()
 
 
 def _engine():

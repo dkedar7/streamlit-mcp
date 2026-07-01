@@ -6,10 +6,22 @@ from pathlib import Path
 
 import pytest
 
-from streamlit_mcp.engine import Engine, PermissionDenied
+from streamlit_mcp.engine import Engine, PermissionDenied, guard_semantic_tool
+from streamlit_mcp.guardrails import Guardrails
 from streamlit_mcp.runtime import AppTestRuntime
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+
+
+# --- 0.3.3 #26: read-only / allow-list gate semantic tools too ---
+def test_guard_semantic_tool_read_only_and_allow_list():
+    guard_semantic_tool(None, "anything")                       # no guard -> ok
+    guard_semantic_tool(Guardrails(), "anything")               # permissive -> ok
+    with pytest.raises(PermissionDenied, match="read-only"):
+        guard_semantic_tool(Guardrails(read_only=True), "reset_all")
+    with pytest.raises(PermissionDenied, match="allow-list"):
+        guard_semantic_tool(Guardrails(allow_list={"other"}), "reset_all")
+    guard_semantic_tool(Guardrails(allow_list={"reset_all"}), "reset_all")  # named -> ok
 
 
 def _engine(guard=None):
