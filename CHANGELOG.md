@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3 (2026-07-01)
+
+- **Fix:** an uncaught app exception no longer corrupts stdout (#27). Streamlit prints a rich
+  traceback to **stdout** when a served app raises; that made `--json` unparseable and put
+  non-protocol bytes on the stdio MCP JSON-RPC channel. The app's stdout is now redirected to
+  stderr for the duration of each run, so stdout carries only the JSON payload / MCP messages —
+  the error is still reported in the structured `exception` field.
+- **Fix (security):** `--read-only` and `--allow` now cover `@mcp_tool` semantic tools on both the
+  CLI and MCP (#26). Previously a semantic tool ran with full side effects despite `--read-only`,
+  returning success. It now fails closed: `--read-only` blocks any tool; `--allow` gates tool
+  names too (`--allow <tool>` opts one back in).
+- **Robustness:** the AppTest run timeout is raised from its 3s default so a slow app or a loaded
+  CI box doesn't spuriously fail a run.
+
 ## 0.3.2 (2026-06-29)
 
 - **Fix:** `live()`'s polling fragment is now reliably skipped under headless AppTest (the agent
