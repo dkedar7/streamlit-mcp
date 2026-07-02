@@ -249,6 +249,47 @@ def test_out_of_range_number_rejected_and_prior_value_preserved():
     assert "Count=0 " in _markdown(rt)[0]
 
 
+# --- 0.3.4 #29: no input widget is silently dropped ---
+DROPPED_APP = (
+    "import streamlit as st, datetime\n"
+    "st.text_input('Name', key='name')\n"
+    "st.time_input('Alarm', value=datetime.time(9, 0), key='alarm')\n"
+    "st.toggle('Dark', key='dark')\n"
+    "st.select_slider('Size', options=['S', 'M', 'L'], key='size')\n"
+    "st.color_picker('Color', key='color')\n"
+    "st.pills('Tags', options=['a', 'b'], key='tags')\n"
+)
+
+
+def test_promoted_widgets_introspected_and_pills_reported():
+    from streamlit_mcp.elements import detect_unsupported_source
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=DROPPED_APP)
+    rt.run()
+    kinds = {w["kind"] for w in Engine(rt).list_widgets()["widgets"]}
+    assert {"time_input", "toggle", "select_slider", "color_picker"} <= kinds  # no longer dropped
+    # pills isn't drivable -> reported explicitly, never silently dropped
+    assert "pills" in [u["element"] for u in detect_unsupported_source(DROPPED_APP)]
+
+
+def test_promoted_widgets_are_drivable():
+    import datetime as _dt
+
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=DROPPED_APP)
+    rt.run()
+    rt.set_widget("Alarm", "10:30")
+    rt.set_widget("Dark", True)
+    rt.set_widget("Size", "L")
+    rt.set_widget("Color", "#ff0000")
+    state = rt.snapshot().session_state
+    assert state["alarm"] == _dt.time(10, 30) and state["dark"] is True
+    assert state["size"] == "L" and state["color"] == "#ff0000"
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Size", "XL")  # invalid select_slider option -> rejected (atomic, #10-style)
+
+
 def test_out_of_range_slider_and_date_rejected():
     from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
     rt = AppTestRuntime(script=RANGE_APP)
