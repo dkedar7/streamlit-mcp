@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.4 (2026-07-02)
+
+- **Widgets no longer silently dropped** (#29). Any input widget that was neither in the
+  supported set nor the unsupported list vanished from `widgets` **and** `unsupported` on every
+  surface, breaking the "reported explicitly, never silently dropped" guarantee. Now:
+  - **`time_input`, `toggle`, `select_slider`, and `color_picker` are supported** — introspected
+    and drivable via `set_widget` (AppTest drives them; `time_input` accepts `"HH:MM"`). This also
+    resolves the inconsistency where `live()` synced `time_input` but `inspect` showed nothing.
+  - the remaining input widgets streamlit-mcp can't drive (`pills`, `segmented_control`,
+    `feedback`, `link_button`, `page_link`, `form_submit_button`, plus the existing
+    file/camera/audio/chat/data_editor/download_button) are **reported in `unsupported`**.
+
 ## 0.3.3 (2026-07-01)
 
 - **Fix:** an uncaught app exception no longer corrupts stdout (#27). Streamlit prints a rich

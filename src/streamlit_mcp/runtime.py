@@ -36,12 +36,16 @@ SUPPORTED_KINDS = (
     "number_input",
     "text_area",
     "slider",
+    "select_slider",
     "selectbox",
     "multiselect",
     "checkbox",
+    "toggle",
     "radio",
     "button",
     "date_input",
+    "time_input",
+    "color_picker",
 )
 
 # Output element kinds we render to agent-readable text.
@@ -209,13 +213,14 @@ class AppTestRuntime:
     # ----------------------------------------------------------------- helpers
     @staticmethod
     def _validate_choice(kind: str, el, value: Any) -> None:
-        """Reject a selectbox/radio/multiselect value that isn't an offered option, before
-        it is written to AppTest. Skipped when the widget exposes no options."""
+        """Reject a selectbox/radio/select_slider/multiselect value that isn't an offered
+        option, before it is written to AppTest. Skipped when the widget exposes no options."""
         options = list(getattr(el, "options", []) or [])
         if not options:
             return
-        if kind in ("selectbox", "radio"):
-            if value not in options:
+        if kind in ("selectbox", "radio", "select_slider"):
+            # select_slider may hold a (lo, hi) range — only validate the single-value form.
+            if not isinstance(value, (list, tuple)) and value not in options:
                 raise RuntimeError_(
                     f"{value!r} is not a valid option for {kind}; choose one of {options}"
                 )
@@ -271,6 +276,8 @@ class AppTestRuntime:
     def _coerce(kind: str, value: Any) -> Any:
         if kind == "date_input" and isinstance(value, str):
             return datetime.date.fromisoformat(value)
+        if kind == "time_input" and isinstance(value, str):
+            return datetime.time.fromisoformat(value)
         if kind == "number_input" and isinstance(value, str):
             try:
                 return int(value)

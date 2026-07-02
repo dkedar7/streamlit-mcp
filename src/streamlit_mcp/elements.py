@@ -16,8 +16,10 @@ from .runtime import RuntimeSnapshot, WidgetSnapshot
 # Widgets that take a value via set_widget vs. the action-only button.
 ACTION_KINDS = ("button",)
 
-# Common Streamlit elements we do NOT support in v1 — reported explicitly, never
-# silently dropped (origin R10 / AE3).
+# Streamlit input/interactive elements we do NOT drive — reported explicitly, never silently
+# dropped (origin R10 / AE3; completed for the full input-widget set in #29). Kept in sync with
+# Streamlit's "Input widgets" category minus the supported kinds; anything here is surfaced in
+# `unsupported` so an agent/human at least learns it exists.
 UNSUPPORTED_ELEMENTS = (
     "file_uploader",
     "camera_input",
@@ -25,8 +27,13 @@ UNSUPPORTED_ELEMENTS = (
     "chat_input",
     "chat_message",
     "data_editor",
-    "color_picker",  # not in the v1 ten
     "download_button",
+    "link_button",
+    "page_link",
+    "form_submit_button",
+    "pills",
+    "segmented_control",
+    "feedback",
 )
 
 _UNSUPPORTED_RE = re.compile(
@@ -37,7 +44,7 @@ _UNSUPPORTED_RE = re.compile(
 def serialize_value(value: Any) -> Any:
     """Make a value JSON-safe (dates -> ISO strings, tuples -> lists, dicts recursed,
     unknown objects -> str). Used for both widget values and session_state."""
-    if isinstance(value, (datetime.date, datetime.datetime)):
+    if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
         return value.isoformat()
     if isinstance(value, (list, tuple)):
         return [serialize_value(v) for v in value]
@@ -96,14 +103,18 @@ def tool_schema_for(model: dict) -> dict:
             value["minimum"] = c["min"]
         if "max" in c:
             value["maximum"] = c["max"]
-    elif kind in ("selectbox", "radio"):
+    elif kind in ("selectbox", "radio", "select_slider"):
         value = {"type": "string", "enum": c.get("options", [])}
     elif kind == "multiselect":
         value = {"type": "array", "items": {"type": "string", "enum": c.get("options", [])}}
-    elif kind == "checkbox":
+    elif kind in ("checkbox", "toggle"):
         value = {"type": "boolean"}
     elif kind == "date_input":
         value = {"type": "string", "format": "date"}
+    elif kind == "time_input":
+        value = {"type": "string", "format": "time"}
+    elif kind == "color_picker":
+        value = {"type": "string"}
     elif kind == "button":
         return {"type": "object", "properties": {}, "description": "click action; no value"}
     else:

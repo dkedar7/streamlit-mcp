@@ -35,10 +35,12 @@ transport for local clients.
 | `read_output()` | the rendered element tree, agent-readable |
 | `get_state()` | the app's `session_state` |
 
-Supported widgets (v1): `text_input`, `number_input`, `text_area`, `slider`, `selectbox`,
-`multiselect`, `checkbox`, `radio`, `button`, `date_input`. Unsupported elements
-(`file_uploader`, `camera_input`, `chat_input`, …) are reported explicitly on every surface
-(text `--layout`, `--json`, and MCP `get_layout`), never silently dropped.
+Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
+`selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,
+`time_input`, `color_picker`. Input widgets streamlit-mcp can't drive (`file_uploader`,
+`camera_input`, `chat_input`, `pills`, `segmented_control`, `feedback`, …) are reported
+explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
+dropped.
 
 !!! note "Atomic writes"
     Setting a `selectbox`/`radio`/`multiselect` to an option that isn't offered, or a

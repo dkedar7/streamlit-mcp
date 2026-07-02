@@ -23,10 +23,10 @@ def rt():
     return r
 
 
-def test_introspect_lists_all_ten_widgets(rt):
+def test_introspect_lists_sample_widgets(rt):
     snap = rt.snapshot()
     kinds = {w.kind for w in snap.widgets}
-    assert kinds == set(SUPPORTED_KINDS)
+    assert kinds <= set(SUPPORTED_KINDS) and len(kinds) == 10  # sample_app's ten, all supported
     # constraints captured where applicable
     sb = next(w for w in snap.widgets if w.kind == "selectbox")
     assert sb.options == ["red", "green", "blue"]
