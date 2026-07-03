@@ -1,6 +1,6 @@
 [project]
 name = "streamlit-mcp"
-version = "0.3.4"
+version = "0.3.5"
 description = "Serve an existing Streamlit app as an MCP server — agents drive it natively, no browser."
 readme = "README.md"
 requires-python = ">=3.10"

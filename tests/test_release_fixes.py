@@ -303,3 +303,42 @@ def test_out_of_range_slider_and_date_rejected():
     rt.set_widget("Level", 70)                       # valid still works
     rt.set_widget("When", "2026-07-01")
     assert "Level=70" in _markdown(rt)[0] and "When=2026-07-01" in _markdown(rt)[0]
+
+
+# --- 0.3.5 #31: an invalid color_picker value is rejected, not silently reverted ---
+COLOR_APP = (
+    "import streamlit as st\n"
+    "c = st.color_picker('Pick', value='#ff0000', key='pick')\n"
+    "st.markdown(f'pick={c}')\n"
+)
+
+
+def test_invalid_color_rejected_and_prior_value_preserved():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=COLOR_APP)
+    rt.run()
+    rt.set_widget("pick", "#00ff00")                 # valid, stored
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("pick", "notacolor")          # invalid -> clean error, nothing applied
+    # the prior valid value must survive — not silently reverted to a default (#31)
+    assert "pick=#00ff00" in _markdown(rt)[0]
+    assert rt.snapshot().session_state["pick"] == "#00ff00"
+
+
+def test_color_picker_accepts_valid_hex_forms():
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=COLOR_APP)
+    rt.run()
+    for good in ("#abc", "#AABBCC", "#0f0f0f"):
+        rt.set_widget("pick", good)                  # 3- and 6-digit hex both stick
+        assert rt.snapshot().session_state["pick"] == good
+
+
+def test_invalid_color_forms_rejected():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=COLOR_APP)
+    rt.run()
+    for bad in ("red", "#12345", "#gggggg", "ff0000", "", 255):
+        with pytest.raises(RuntimeError_):
+            rt.set_widget("pick", bad)
+    assert rt.snapshot().session_state["pick"] == "#ff0000"  # never mutated by a rejected set

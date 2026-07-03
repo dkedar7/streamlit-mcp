@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable
@@ -187,9 +188,11 @@ class AppTestRuntime:
         # Reject a bad value BEFORE writing it. An invalid *option* raises inside at.run()
         # and the pending bad value poisons every later call (#10); an out-of-range *number/
         # slider/date* does the opposite — AppTest silently resets it to the widget default
-        # and run() does NOT raise, so it must be caught up front too (#12).
+        # and run() does NOT raise, so it must be caught up front too (#12). A bad *color*
+        # reverts the same silent way (#31), so it needs its own up-front check as well.
         self._validate_choice(kind, el, coerced)
         self._validate_range(kind, el, coerced)
+        self._validate_color(kind, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
@@ -251,6 +254,23 @@ class AppTestRuntime:
                 raise RuntimeError_(f"{v!r} is out of range for {kind}: minimum is {lo!r}")
             if above:
                 raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
+
+    # A color_picker accepts only a #RGB / #RRGGBB hex string. AppTest normalizes anything
+    # else (a bad hex, a CSS name, a wrong-length string) back to the widget default without
+    # raising — the same silent-revert path as an out-of-range number (#12) — so the rollback
+    # net never fires. Catch it up front (#31). Verified against AppTest: only 3- or 6-digit
+    # hex sticks; "#12345", "#gggggg", "red", "notacolor" all revert.
+    _COLOR_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
+
+    @classmethod
+    def _validate_color(cls, kind: str, value: Any) -> None:
+        if kind != "color_picker":
+            return
+        if not (isinstance(value, str) and cls._COLOR_RE.match(value)):
+            raise RuntimeError_(
+                f"{value!r} is not a valid color for color_picker; expected a hex string "
+                "like '#ff0000' or '#f00'"
+            )
 
     def _rollback(self, identifier: str, prior: Any) -> None:
         """Best-effort restore of a widget's prior value + re-run, so one failed set doesn't
