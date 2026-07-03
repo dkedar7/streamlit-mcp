@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5 (2026-07-03)
+
+- **Fix:** an invalid `color_picker` value is now rejected instead of silently reverting (#31).
+  `color_picker` became a supported widget in 0.3.4, but a bad value (`"notacolor"`, a CSS name,
+  a wrong-length hex) fell through both validation nets: AppTest normalizes it back to the widget
+  default **without raising**, so `set_widget` reported success (`exit 0` / `isError=false`) while
+  discarding the requested value — and clobbering any prior valid one in a long-lived session. This
+  is the same silent-revert class as the out-of-range fix in #12, now closed for `color_picker`:
+  `set_widget` validates up front that the value is a `#RGB`/`#RRGGBB` hex string and raises a clear
+  error otherwise, leaving the prior value untouched (atomic, on both the CLI and MCP).
+
 ## 0.3.4 (2026-07-02)
 
 - **Widgets no longer silently dropped** (#29). Any input widget that was neither in the
