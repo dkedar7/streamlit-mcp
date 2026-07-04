@@ -342,3 +342,37 @@ def test_invalid_color_forms_rejected():
         with pytest.raises(RuntimeError_):
             rt.set_widget("pick", bad)
     assert rt.snapshot().session_state["pick"] == "#ff0000"  # never mutated by a rejected set
+
+
+# --- 0.3.6 #33: an invalid range (two-handle) select_slider value is rejected, not reverted ---
+RANGE_SLIDER_APP = (
+    "import streamlit as st\n"
+    "r = st.select_slider('Range', options=['xs', 's', 'm', 'l', 'xl'],\n"
+    "                     value=('s', 'l'), key='rng')\n"
+    "st.markdown(f'rng={list(r)}')\n"
+)
+
+
+def test_invalid_range_select_slider_rejected_and_prior_value_preserved():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=RANGE_SLIDER_APP)
+    rt.run()
+    rt.set_widget("rng", ["xs", "m"])                # valid range, stored
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("rng", ["xl", "NOPE"])        # bad handle -> clean error, nothing applied
+    # the prior valid range must survive — not silently reverted / clobbered (#33)
+    assert "rng=['xs', 'm']" in _markdown(rt)[0]
+    assert list(rt.snapshot().session_state["rng"]) == ["xs", "m"]
+    rt.set_widget("rng", ["s", "xl"])                # valid range still works
+    assert list(rt.snapshot().session_state["rng"]) == ["s", "xl"]
+
+
+def test_single_value_select_slider_still_validated():
+    # the single-value form (the #29 path) must keep rejecting a non-option
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=DROPPED_APP)
+    rt.run()
+    rt.set_widget("Size", "L")                       # valid
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("Size", "XL")                 # not an offered option
+    assert rt.snapshot().session_state["size"] == "L"

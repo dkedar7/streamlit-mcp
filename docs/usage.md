@@ -43,7 +43,8 @@ explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), n
 dropped.
 
 !!! note "Atomic writes"
-    Setting a `selectbox`/`radio`/`multiselect` to an option that isn't offered, a
+    Setting a `selectbox`/`radio`/`select_slider`/`multiselect` to an option that isn't offered
+    (including every handle of a two-handle `select_slider` range), a
     `number_input`/`slider`/`date_input` outside its `min`/`max`, or a `color_picker` to
     anything but a `#RGB`/`#RRGGBB` hex string, is rejected **before** any state changes — with
     a clear error listing the valid choices/range/format. A failed `set_widget` leaves the

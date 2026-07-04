@@ -221,18 +221,21 @@ class AppTestRuntime:
         options = list(getattr(el, "options", []) or [])
         if not options:
             return
-        if kind in ("selectbox", "radio", "select_slider"):
-            # select_slider may hold a (lo, hi) range — only validate the single-value form.
-            if not isinstance(value, (list, tuple)) and value not in options:
+        if kind in ("selectbox", "radio"):
+            if value not in options:
                 raise RuntimeError_(
                     f"{value!r} is not a valid option for {kind}; choose one of {options}"
                 )
-        elif kind == "multiselect":
-            values = value if isinstance(value, list) else [value]
+        elif kind in ("select_slider", "multiselect"):
+            # Both carry multiple values against a fixed option list: multiselect a list,
+            # select_slider a single value OR a (lo, hi) range. Every element must be an
+            # offered option — the range form used to be skipped, so a bad handle silently
+            # reverted while reporting success (#33).
+            values = list(value) if isinstance(value, (list, tuple)) else [value]
             invalid = [v for v in values if v not in options]
             if invalid:
                 raise RuntimeError_(
-                    f"{invalid!r} are not valid options for multiselect; choose from {options}"
+                    f"{invalid!r} are not valid options for {kind}; choose from {options}"
                 )
 
     @staticmethod
