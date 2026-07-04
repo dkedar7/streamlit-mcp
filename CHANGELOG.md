@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.8 (2026-07-04)
+
+Proactive hardening of guardrail enforcement coverage, from a self-audit of every action/read
+path against read-only, allow-list, and bearer auth (the class behind #4/#7/#26):
+
+- **Security fix:** the `--allow` allow-list no longer leaks a hidden widget's **value**. A
+  non-listed widget was correctly dropped from `list_widgets`/`get_layout` and blocked from
+  `set_widget`/`click`, but its value still came back through every `session_state`-bearing read
+  (`get_state`, `read_output`, `get_layout`, and the dict a write returns) — so the allow-list
+  guarded the *widgets* surface but not the *state* surface (the same "guard misses a path" shape
+  as #26). The allow-list now filters those hidden widgets' values out of `session_state` on all
+  read paths, on both the CLI and MCP. App state that isn't a widget (counters, flags an app
+  stashes in `session_state`) is preserved, so nothing is over-hidden; `--read-only` and the
+  no-guard path are unchanged (they don't filter reads). See `docs/security.md` for the one
+  remaining caveat (the allow-list governs widget *state*, not what an app chooses to *render*).
+
 ## 0.3.7 (2026-07-04)
 
 Proactive hardening of `set_widget` value coercion, from a self-audit of the whole widget

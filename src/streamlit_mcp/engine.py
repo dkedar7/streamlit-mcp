@@ -56,7 +56,7 @@ class Engine:
         out: dict = {
             "widgets": self._visible_widgets(snap),
             "outputs": outputs_to_list(snap),
-            "session_state": serialize_value(snap.session_state),
+            "session_state": self._visible_state(snap),
         }
         if self.app_path:
             out["unsupported"] = detect_unsupported(self.app_path)
@@ -68,12 +68,12 @@ class Engine:
         snap = self.rt.snapshot()
         return {
             "outputs": outputs_to_list(snap),
-            "session_state": serialize_value(snap.session_state),
+            "session_state": self._visible_state(snap),
             "exception": snap.exception,
         }
 
     def get_state(self) -> dict:
-        return serialize_value(self.rt.snapshot().session_state)
+        return self._visible_state(self.rt.snapshot())
 
     # --------------------------------------------------------------- writes
     def set_widget(self, identifier: str, value: Any) -> dict:
@@ -95,6 +95,28 @@ class Engine:
         if self.guard is not None and hasattr(self.guard, "filter_widgets"):
             models = self.guard.filter_widgets(models)
         return models
+
+    def _visible_state(self, snapshot) -> dict:
+        """session_state with the values of allow-list-hidden widgets removed. Without this the
+        allow-list hides a widget from ``list_widgets`` but its value still leaks through every
+        session_state-bearing read (``get_state``/``read_output``/``get_layout`` and the dict a
+        write returns) — the allow-list would guard the widgets surface but not the state surface.
+        Only keys that belong to a NON-allow-listed *widget* are dropped; non-widget app state
+        (counters, flags an app stashes in session_state) is kept, so this doesn't over-hide."""
+        state = serialize_value(snapshot.session_state)
+        if self.guard is None or getattr(self.guard, "allow_list", None) is None:
+            return state
+        hidden: set[str] = set()
+        for w in widgets_to_models(snapshot):  # unfiltered, so we can see what to hide
+            key = w.get("key")
+            if not key:
+                continue
+            allowed = self.guard.is_allowed(w["identifier"]) or (
+                w["label"] and self.guard.is_allowed(w["label"])
+            )
+            if not allowed:
+                hidden.add(key)
+        return {k: v for k, v in state.items() if k not in hidden}
 
     def _guard_write(self) -> None:
         if self.guard is not None and not self.guard.can_write():
