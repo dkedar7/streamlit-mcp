@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.7 (2026-07-04)
+
+Proactive hardening of `set_widget` value coercion, from a self-audit of the whole widget
+surface for the silent-revert / atomicity class (siblings of #12, #31, #33):
+
+- **Fix:** an out-of-range element in a **`date_input` range** (`(start, end)`) is now rejected
+  instead of silently reverting. The range value stayed a list of raw strings (only bare-string
+  dates were coerced), so `_validate_range` hit a `str < date` `TypeError`, bailed, and let the
+  bad date slip through to a silent revert-and-report-success. `date_input` now coerces **each**
+  end of a range to a real date, so the bounds check runs and rejects the bad end up front,
+  leaving the prior value untouched (atomic, CLI + MCP).
+- **Cleaner errors:** an unparseable `number_input`, `date_input`, or `time_input` value now
+  raises a clear, actionable message (e.g. `'abc' is not a valid number for number_input`;
+  `'25:99' is not a valid time for time_input; use 24-hour 'HH:MM' like '09:30'`) instead of a
+  raw Python `ValueError` (`could not convert string to float`, `Invalid isoformat string`).
+- **Boolean spellings:** `checkbox`/`toggle` accept the natural string/int spellings a human
+  passes on the CLI (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`, case-insensitive) and reject
+  anything else with a clear `not a valid boolean` error rather than an opaque rollback message.
+
 ## 0.3.6 (2026-07-04)
 
 - **Fix:** an invalid **range** (two-handle) `select_slider` value is now rejected instead of

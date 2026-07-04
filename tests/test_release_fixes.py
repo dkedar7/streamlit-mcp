@@ -376,3 +376,62 @@ def test_single_value_select_slider_still_validated():
     with pytest.raises(RuntimeError_):
         rt.set_widget("Size", "XL")                 # not an offered option
     assert rt.snapshot().session_state["size"] == "L"
+
+
+# --- 0.3.7 proactive self-audit: harden set_widget value coercion (sibling of #12/#33) ---
+DATE_RANGE_APP = (
+    "import streamlit as st, datetime\n"
+    "d = st.date_input('When', value=(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)),\n"
+    "                  min_value=datetime.date(2026, 1, 1), max_value=datetime.date(2026, 12, 31),\n"
+    "                  key='when')\n"
+    "st.markdown(f'when={[str(x) for x in d]}')\n"
+)
+
+
+def test_date_range_out_of_bounds_element_rejected_not_reverted():
+    # the date-range sibling of #33: a range whose element is out of [min,max] used to slip past
+    # _validate_range (str<date -> TypeError -> bail) and silently revert; now coerced + rejected.
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=DATE_RANGE_APP)
+    rt.run()
+    rt.set_widget("when", ["2026-02-01", "2026-02-28"])   # valid range, stored
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("when", ["2026-02-01", "2030-01-01"])  # 2030 past max -> rejected up front
+    assert "when=['2026-02-01', '2026-02-28']" in _markdown(rt)[0]  # prior value survives
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("when", ["not-a-date", "2026-02-28"])  # bad-format element -> clean reject
+
+
+def test_coercion_failures_give_clean_actionable_errors():
+    # a bad number/date/time value is a clean RuntimeError_ naming the widget, not a raw ValueError
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    cases = [
+        ("import streamlit as st\nst.number_input('N', value=5, key='k')\n", "abc", "number"),
+        ("import streamlit as st, datetime\n"
+         "st.date_input('D', value=datetime.date(2026,1,1), key='k')\n", "not-a-date", "date"),
+        ("import streamlit as st, datetime\n"
+         "st.time_input('T', value=datetime.time(9,0), key='k')\n", "25:99", "time"),
+    ]
+    for script, bad, word in cases:
+        rt = AppTestRuntime(script=script)
+        rt.run()
+        with pytest.raises(RuntimeError_) as exc:
+            rt.set_widget("k", bad)
+        msg = str(exc.value)
+        assert word in msg and "Traceback" not in msg
+
+
+def test_bool_widget_accepts_common_spellings_and_rejects_junk():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    script = "import streamlit as st\nst.checkbox('C', value=False, key='k')\n"
+    for good, expected in [("true", True), ("false", False), (1, True), (0, False),
+                           ("yes", True), ("no", False), (True, True)]:
+        rt = AppTestRuntime(script=script)
+        rt.run()
+        rt.set_widget("k", good)
+        assert rt.snapshot().session_state["k"] is expected
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    with pytest.raises(RuntimeError_):
+        rt.set_widget("k", "maybe")                  # not a boolean -> clean reject, atomic
+    assert rt.snapshot().session_state["k"] is False

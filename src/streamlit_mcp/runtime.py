@@ -296,16 +296,67 @@ class AppTestRuntime:
         raise WidgetNotFound(f"no widget matching {identifier!r}")
 
     @staticmethod
-    def _coerce(kind: str, value: Any) -> Any:
-        if kind == "date_input" and isinstance(value, str):
+    def _to_date(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        try:
             return datetime.date.fromisoformat(value)
-        if kind == "time_input" and isinstance(value, str):
+        except ValueError:
+            raise RuntimeError_(
+                f"{value!r} is not a valid date for date_input; use ISO format like '2026-01-31'"
+            ) from None
+
+    @staticmethod
+    def _to_time(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        try:
             return datetime.time.fromisoformat(value)
+        except ValueError:
+            raise RuntimeError_(
+                f"{value!r} is not a valid time for time_input; use 24-hour 'HH:MM' like '09:30'"
+            ) from None
+
+    # accepted string spellings of a boolean, for checkbox/toggle set from the CLI
+    _BOOL_STRINGS = {"true": True, "false": False, "1": True, "0": False,
+                     "yes": True, "no": False, "on": True, "off": False}
+
+    @classmethod
+    def _to_bool(cls, kind: str, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):  # 0/1 from a JSON number
+            return bool(value)
+        if isinstance(value, str):
+            v = cls._BOOL_STRINGS.get(value.strip().lower())
+            if v is not None:
+                return v
+        raise RuntimeError_(f"{value!r} is not a valid boolean for {kind}; use true or false")
+
+    @classmethod
+    def _coerce(cls, kind: str, value: Any) -> Any:
+        # A clean, actionable error on a bad value beats a raw Python ValueError leaking to the
+        # CLI/MCP boundary; coercing every element of a *range* (list/tuple) keeps the value
+        # typed so _validate_range can bounds-check it instead of bailing on a str<date compare
+        # (the date-range sibling of the #33 select_slider gap).
+        if kind == "date_input":
+            if isinstance(value, (list, tuple)):
+                return [cls._to_date(v) for v in value]
+            return cls._to_date(value)
+        if kind == "time_input":
+            return cls._to_time(value)
         if kind == "number_input" and isinstance(value, str):
             try:
                 return int(value)
             except ValueError:
-                return float(value)
+                try:
+                    return float(value)
+                except ValueError:
+                    raise RuntimeError_(
+                        f"{value!r} is not a valid number for number_input"
+                    ) from None
+        if kind in ("checkbox", "toggle"):
+            return cls._to_bool(kind, value)
         if kind == "multiselect" and isinstance(value, str):
             return [value]
         if kind in ("text_input", "text_area") and not isinstance(value, str):
