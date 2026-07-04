@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.6 (2026-07-04)
+
+- **Fix:** an invalid **range** (two-handle) `select_slider` value is now rejected instead of
+  silently reverting (#33). The single-value form was already validated, but `_validate_choice`
+  explicitly skipped list/tuple values, so a range set with a handle that isn't an offered option
+  (e.g. `["xl", "NOPE"]`) fell through all three safety nets — AppTest reverts the bad handle to
+  the default without raising, so `set_widget` reported success (`exit 0` / `isError=false`) while
+  discarding the requested value and clobbering any prior valid range. `select_slider` now
+  validates **every** handle against `options` (like `multiselect`), raising a clear error up front
+  and leaving the prior value untouched (atomic, CLI + MCP). Closes the last known gap in the
+  silent-revert class (#10/#12/#31).
+
 ## 0.3.5 (2026-07-03)
 
 - **Fix:** an invalid `color_picker` value is now rejected instead of silently reverting (#31).
