@@ -22,6 +22,12 @@ streamlit-mcp serve app.py --transport http --host 0.0.0.0 --bearer-token "$TOKE
 `--read-only` blocks state-changing tools (`set_widget`/`click`), and `--allow <id>` restricts
 which widgets can be seen or set. Both are enforced **identically** on the CLI and over MCP.
 
+`--allow` hides a non-listed widget everywhere: it's dropped from `list_widgets`/`get_layout`, it
+can't be set or clicked, **and its value is filtered out of every `session_state` read**
+(`get_state`, `read_output`, `get_layout`, and the state a write returns) — so the allow-list can't
+be sidestepped by reading state directly. App state that isn't a widget (counters, flags an app
+stashes in `session_state`) is preserved.
+
 They also cover **`@mcp_tool` semantic tools**, and fail closed: because streamlit-mcp can't know
 whether a given tool mutates, `--read-only` blocks *any* semantic tool, and `--allow` gates tool
 **names** too — `--allow reset_all` opts one specific tool back in. So `--read-only` really is a
@@ -36,3 +42,6 @@ look-but-don't-touch surface, including the higher-level action layer.
   `AppTest` is not known to be re-entrant — use one in-flight request per session for now.
 - **Output capture** covers headings / markdown / caption / text; `st.write`, `st.error`, and
   similar are a planned coverage expansion.
+- **`--allow` filters widget *state*, not rendered output.** If the app itself renders a hidden
+  widget's value into an output (e.g. `st.write(st.session_state["secret"])`), that text is still
+  returned — the allow-list governs widget access, not what the app chooses to display.
