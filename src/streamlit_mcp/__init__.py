@@ -5,7 +5,7 @@ interface); widgets auto-map to MCP tools, and a human-first CLI exercises the s
 engine an agent uses (parity).
 """
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 
 # Public API
 # Live human-in-the-loop sync lives in the `streamlit_mcp.live` submodule (import it directly:
