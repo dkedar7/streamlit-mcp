@@ -87,3 +87,7 @@ with live("signup", defaults={...}, store=RedisStore()):
 - It's **last-writer-wins** on a coarse version (atomic writes prevent torn reads, not lost
   concurrent updates) — fine for human-in-the-loop, not a CRDT.
 - Polling reruns the script every `run_every` — tune it for your app.
+- **The store persists across restarts** — it's the source of truth, so `defaults` only seed an
+  *empty* store. A fresh browser shows the last values written, not `defaults`; to reset, delete
+  the store file (`FileStore` lives at `<tempdir>/streamlit_mcp_live_<name>.json`) or change the
+  `live()` name.
