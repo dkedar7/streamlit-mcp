@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.9 (2026-07-05)
+
+- **Fix:** `read_output`/`get_layout`/`list_widgets`/`inspect` now return elements in
+  **document/render order** instead of grouping them by kind (#39). `snapshot()` built its lists
+  by iterating each kind's typed accessor (`at.title`, `at.markdown`, `at.text_input`, …) in turn,
+  so every heading was hoisted above all body text and a form's fields were regrouped by type —
+  the transcript an agent read back bore no relation to how the app renders. It now walks the
+  block tree (sidebar then main, recursing into columns/expanders) in render order, so the
+  "rendered element tree" the README advertises is actually ordered. Same elements are captured —
+  only their order changes — on every surface (text CLI, `--json`, MCP). Order *within* a kind was
+  already correct; this fixes the cross-kind grouping.
+
 ## 0.3.8 (2026-07-04)
 
 Proactive hardening of guardrail enforcement coverage, from a self-audit of every action/read

@@ -35,6 +35,9 @@ transport for local clients.
 | `read_output()` | the rendered element tree, agent-readable |
 | `get_state()` | the app's `session_state` |
 
+Widgets and outputs are returned in **document/render order** (the order the app renders them,
+recursing through the sidebar and columns), so the layout an agent reads back matches the app.
+
 Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
 `selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,
 `time_input`, `color_picker`. Input widgets streamlit-mcp can't drive (`file_uploader`,

@@ -435,3 +435,40 @@ def test_bool_widget_accepts_common_spellings_and_rejects_junk():
     with pytest.raises(RuntimeError_):
         rt.set_widget("k", "maybe")                  # not a boolean -> clean reject, atomic
     assert rt.snapshot().session_state["k"] is False
+
+
+# --- 0.3.9 #39: snapshot preserves document/render order, not per-kind grouping ---
+def test_outputs_returned_in_document_order():
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=(
+        "import streamlit as st\n"
+        "st.markdown('A'); st.title('B'); st.markdown('C'); st.caption('D')\n"))
+    rt.run()
+    # A(markdown) B(title) C(markdown) D(caption) — the title must NOT hoist above A (kind grouping)
+    assert [o.text for o in rt.snapshot().outputs] == ["A", "B", "C", "D"]
+
+
+def test_widgets_returned_in_declaration_order():
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=(
+        "import streamlit as st\n"
+        "st.text_input('1'); st.slider('2', 0, 10, 5); st.text_input('3')\n"
+        "st.checkbox('4'); st.slider('5', 0, 10, 5)\n"))
+    rt.run()
+    # declared 1..5 across mixed kinds — not regrouped into text_inputs, then sliders, then checkbox
+    assert [w.label for w in rt.snapshot().widgets] == ["1", "2", "3", "4", "5"]
+
+
+def test_document_order_holds_across_sidebar_and_columns():
+    # parity: switching to a tree walk must not drop sidebar or nested (column) widgets
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=(
+        "import streamlit as st\n"
+        "st.sidebar.text_input('side', key='side')\n"
+        "st.text_input('main', key='main')\n"
+        "c1, c2 = st.columns(2)\n"
+        "c1.selectbox('C', ['x', 'y'], key='sel'); c2.checkbox('chk', key='chk')\n"))
+    rt.run()
+    keys = [w.key for w in rt.snapshot().widgets]
+    assert set(keys) == {"side", "main", "sel", "chk"}   # none dropped
+    assert keys.index("side") < keys.index("main")       # sidebar (left rail) before main, in order

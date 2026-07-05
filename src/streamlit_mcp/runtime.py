@@ -130,28 +130,43 @@ class AppTestRuntime:
     # ------------------------------------------------------------- introspect
     def snapshot(self) -> RuntimeSnapshot:
         self._ensure()
+        supported, output_kinds = set(SUPPORTED_KINDS), set(OUTPUT_KINDS)
         widgets: list[WidgetSnapshot] = []
-        for kind in SUPPORTED_KINDS:
-            for index, el in enumerate(getattr(self.at, kind, [])):
-                widgets.append(
-                    WidgetSnapshot(
-                        kind=kind,
-                        index=index,
-                        key=getattr(el, "key", None),
-                        label=getattr(el, "label", None),
-                        value=getattr(el, "value", None),
-                        options=list(getattr(el, "options", []) or []) or None,
-                        min=getattr(el, "min", None),
-                        max=getattr(el, "max", None),
-                        step=getattr(el, "step", None),
-                    )
-                )
         outputs: list[OutputSnapshot] = []
-        for kind in OUTPUT_KINDS:
-            for el in getattr(self.at, kind, []):
-                val = getattr(el, "value", None)
-                if val is not None:
-                    outputs.append(OutputSnapshot(kind=kind, text=str(val)))
+        kind_index: dict[str, int] = {}
+        # Walk the block tree in document/render order, not by kind. AppTest's typed accessors
+        # (at.text_input, at.markdown, ...) each return one list per kind, so concatenating them
+        # kind-by-kind reorders the app — every heading hoisted above all body text, a form's
+        # fields regrouped by type — bearing no relation to how the app renders (#39). Iterating
+        # the blocks preserves render order and still yields the same rich element objects. Sidebar
+        # first (it's the left rail / first in the DOM), then main; nested blocks (columns, expanders)
+        # recurse and their container nodes fall through since their .type isn't a widget/output kind.
+        # index stays a per-kind counter so the `kind[index]` identifier fallback is unchanged.
+        for root in (getattr(self.at, "sidebar", None), self.at.main):
+            if root is None:
+                continue
+            for el in root:
+                kind = getattr(el, "type", None)
+                if kind in supported:
+                    idx = kind_index.get(kind, 0)
+                    kind_index[kind] = idx + 1
+                    widgets.append(
+                        WidgetSnapshot(
+                            kind=kind,
+                            index=idx,
+                            key=getattr(el, "key", None),
+                            label=getattr(el, "label", None),
+                            value=getattr(el, "value", None),
+                            options=list(getattr(el, "options", []) or []) or None,
+                            min=getattr(el, "min", None),
+                            max=getattr(el, "max", None),
+                            step=getattr(el, "step", None),
+                        )
+                    )
+                elif kind in output_kinds:
+                    val = getattr(el, "value", None)
+                    if val is not None:
+                        outputs.append(OutputSnapshot(kind=kind, text=str(val)))
         return RuntimeSnapshot(
             widgets=widgets,
             outputs=outputs,
