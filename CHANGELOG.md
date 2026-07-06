@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.10 (2026-07-06)
+
+- **Fix:** the `kind[index]` identifier that `list_widgets`/`get_layout`/`inspect` advertise for a
+  keyless, empty-label widget (e.g. `text_input[1]`) is now resolvable by `set_widget`/`click`
+  (#41). `_identifier` minted the `kind[index]` fallback but `_find` only matched key/label, so the
+  one handle the tools ever exposed for such a widget was a dead handle — `set_widget`/`click`
+  rejected it with `no widget matching`, breaking the `list_widgets` → `set_widget` round-trip on
+  both CLI and MCP. `_find` now resolves the `kind[index]` form. To guarantee it names the same
+  widget `snapshot()` advertised (accessor order ≠ document order once a sidebar is involved),
+  `snapshot()` and `_find` now share one document-order widget iterator, so the numbering can't
+  drift between what's shown and what's resolved.
+
 ## 0.3.9 (2026-07-05)
 
 - **Fix:** `read_output`/`get_layout`/`list_widgets`/`inspect` now return elements in

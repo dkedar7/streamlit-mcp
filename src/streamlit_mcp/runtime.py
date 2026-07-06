@@ -128,45 +128,58 @@ class AppTestRuntime:
             self.run()
 
     # ------------------------------------------------------------- introspect
-    def snapshot(self) -> RuntimeSnapshot:
-        self._ensure()
-        supported, output_kinds = set(SUPPORTED_KINDS), set(OUTPUT_KINDS)
-        widgets: list[WidgetSnapshot] = []
-        outputs: list[OutputSnapshot] = []
-        kind_index: dict[str, int] = {}
-        # Walk the block tree in document/render order, not by kind. AppTest's typed accessors
-        # (at.text_input, at.markdown, ...) each return one list per kind, so concatenating them
-        # kind-by-kind reorders the app — every heading hoisted above all body text, a form's
-        # fields regrouped by type — bearing no relation to how the app renders (#39). Iterating
-        # the blocks preserves render order and still yields the same rich element objects. Sidebar
-        # first (it's the left rail / first in the DOM), then main; nested blocks (columns, expanders)
-        # recurse and their container nodes fall through since their .type isn't a widget/output kind.
-        # index stays a per-kind counter so the `kind[index]` identifier fallback is unchanged.
+    def _walk(self):
+        """Yield every element under the sidebar then main blocks, in document/render order.
+        AppTest's typed accessors (at.text_input, at.markdown, ...) each return one list per kind,
+        so concatenating them kind-by-kind reorders the app — every heading hoisted above all body
+        text, a form's fields regrouped by type — bearing no relation to how it renders (#39).
+        Walking the blocks preserves render order and still yields the same rich element objects.
+        Sidebar first (it's the left rail / first in the DOM), then main; nested blocks (columns,
+        expanders) recurse, and their container nodes fall through since their .type isn't a
+        widget/output kind. at.main alone excludes the sidebar, so both roots are walked."""
         for root in (getattr(self.at, "sidebar", None), self.at.main):
             if root is None:
                 continue
-            for el in root:
-                kind = getattr(el, "type", None)
-                if kind in supported:
-                    idx = kind_index.get(kind, 0)
-                    kind_index[kind] = idx + 1
-                    widgets.append(
-                        WidgetSnapshot(
-                            kind=kind,
-                            index=idx,
-                            key=getattr(el, "key", None),
-                            label=getattr(el, "label", None),
-                            value=getattr(el, "value", None),
-                            options=list(getattr(el, "options", []) or []) or None,
-                            min=getattr(el, "min", None),
-                            max=getattr(el, "max", None),
-                            step=getattr(el, "step", None),
-                        )
-                    )
-                elif kind in output_kinds:
-                    val = getattr(el, "value", None)
-                    if val is not None:
-                        outputs.append(OutputSnapshot(kind=kind, text=str(val)))
+            yield from root
+
+    def _iter_widgets(self):
+        """(kind, index, el) for every supported widget in document order. The single source of
+        widget identity — snapshot() (what an agent reads) and _find() (what set_widget/click
+        resolve) both consume it, so an advertised identifier is exactly the one _find accepts,
+        including the ``kind[index]`` fallback (#41). ``index`` is a per-kind counter in this order."""
+        supported = set(SUPPORTED_KINDS)
+        kind_index: dict[str, int] = {}
+        for el in self._walk():
+            kind = getattr(el, "type", None)
+            if kind in supported:
+                idx = kind_index.get(kind, 0)
+                kind_index[kind] = idx + 1
+                yield kind, idx, el
+
+    def snapshot(self) -> RuntimeSnapshot:
+        self._ensure()
+        output_kinds = set(OUTPUT_KINDS)
+        widgets = [
+            WidgetSnapshot(
+                kind=kind,
+                index=idx,
+                key=getattr(el, "key", None),
+                label=getattr(el, "label", None),
+                value=getattr(el, "value", None),
+                options=list(getattr(el, "options", []) or []) or None,
+                min=getattr(el, "min", None),
+                max=getattr(el, "max", None),
+                step=getattr(el, "step", None),
+            )
+            for kind, idx, el in self._iter_widgets()
+        ]
+        outputs: list[OutputSnapshot] = []
+        for el in self._walk():
+            kind = getattr(el, "type", None)
+            if kind in output_kinds:
+                val = getattr(el, "value", None)
+                if val is not None:
+                    outputs.append(OutputSnapshot(kind=kind, text=str(val)))
         return RuntimeSnapshot(
             widgets=widgets,
             outputs=outputs,
@@ -302,12 +315,23 @@ class AppTestRuntime:
 
     def _find(self, identifier: str):
         self._ensure()
-        # match on key first, then label
+        # match on key first, then label (a widget is reachable by either, even though
+        # _identifier advertises key-if-present-else-label)
         for by in ("key", "label"):
             for kind in SUPPORTED_KINDS:
                 for el in getattr(self.at, kind, []):
                     if getattr(el, by, None) == identifier:
                         return kind, el
+        # then the ``kind[index]`` fallback _identifier hands out for a keyless, empty-label
+        # widget — resolved through the SAME document-order numbering snapshot() advertises, so
+        # the list_widgets -> set_widget round-trip holds. Without this the advertised identifier
+        # is a dead handle: the one string the tool tells you to use, and the one _find rejects (#41).
+        m = re.fullmatch(r"(\w+)\[(\d+)\]", identifier)
+        if m:
+            want_kind, want_idx = m.group(1), int(m.group(2))
+            for kind, idx, el in self._iter_widgets():
+                if kind == want_kind and idx == want_idx:
+                    return kind, el
         raise WidgetNotFound(f"no widget matching {identifier!r}")
 
     @staticmethod
