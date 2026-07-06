@@ -472,3 +472,40 @@ def test_document_order_holds_across_sidebar_and_columns():
     keys = [w.key for w in rt.snapshot().widgets]
     assert set(keys) == {"side", "main", "sel", "chk"}   # none dropped
     assert keys.index("side") < keys.index("main")       # sidebar (left rail) before main, in order
+
+
+# --- 0.3.10 #41: every advertised identifier (incl. the kind[index] fallback) resolves ---
+def test_kind_index_identifier_round_trips():
+    # a keyless, empty-label widget is advertised as kind[index]; that handle must be settable
+    from streamlit_mcp.elements import widgets_to_models
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=(
+        "import streamlit as st\n"
+        "st.text_input('Name', key='name')\n"
+        "st.text_input('', label_visibility='collapsed')\n"))  # -> text_input[1]
+    rt.run()
+    ids = [m["identifier"] for m in widgets_to_models(rt.snapshot())]
+    assert "text_input[1]" in ids                 # the advertised dead handle
+    rt.set_widget("text_input[1]", "hello")       # must resolve now, not "no widget matching"
+    # the value landed on the keyless widget (2nd text_input), not the keyed one
+    assert rt._find("text_input[1]")[1].value == "hello"
+    assert rt.snapshot().session_state.get("name") == ""
+
+
+def test_every_advertised_identifier_resolves_and_maps_to_same_widget():
+    # the round-trip guarantee: _find and snapshot share numbering, so kind[index] is consistent
+    # even when a keyless widget sits in the sidebar (accessor order != document order)
+    from streamlit_mcp.elements import _identifier
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=(
+        "import streamlit as st\n"
+        "st.sidebar.text_input('', label_visibility='collapsed')\n"   # doc-order text_input[0]
+        "st.text_input('', label_visibility='collapsed')\n"))         # doc-order text_input[1]
+    rt.run()
+    rt.set_widget("text_input[0]", "SIDE")
+    rt.set_widget("text_input[1]", "MAIN")
+    by_index = {w.index: w.value for w in rt.snapshot().widgets if w.kind == "text_input"}
+    assert by_index == {0: "SIDE", 1: "MAIN"}     # [0] hit sidebar, [1] hit main — not reversed
+    # and every identifier snapshot advertises resolves to a real element
+    for w in rt.snapshot().widgets:
+        assert rt._find(_identifier(w))[1] is not None
