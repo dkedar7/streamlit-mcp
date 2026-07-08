@@ -33,6 +33,10 @@ uv run --with openai python -m arena run --agent llm --provider openrouter \
     --model "anthropic/claude-opus-4" --json
 
 uv run python -m arena leaderboard              # compare every run in arena/results/
+
+# drive over the REAL MCP transport (spawns `streamlit-mcp serve`, talks JSON-RPC) instead of the
+# in-process engine — full-stack fidelity:
+uv run --with fastmcp python -m arena run --agent scripted --transport mcp
 ```
 
 Example (oracle):
@@ -65,11 +69,18 @@ task (app.py + goal + checker + oracle)
    checker(final_state, output) ──► EpisodeResult ──► report (markdown + json)
 ```
 
-- **`env.py`** — `ArenaEnv` wraps the streamlit-mcp `Engine` (the same code the MCP server
-  dispatches to — the parity guarantee makes in-process driving representative). It exposes exactly
-  the six core tools, counts only *actions* against the budget, and separates an **expected tool
-  error** (bad value / not found / guardrail block — a signal the agent adapts to) from an
-  **unexpected exception** (a streamlit-mcp bug → `crash`).
+- **`env.py` / `mcp_env.py`** — two interchangeable environments behind the same six-tool interface,
+  chosen with `--transport`:
+  - `ArenaEnv` (**engine**, default) wraps the streamlit-mcp `Engine` in-process — fast, and
+    representative thanks to the parity guarantee.
+  - `McpEnv` (**mcp**) spawns `streamlit-mcp serve <app>` and drives it through a `fastmcp` stdio
+    client — full-stack fidelity (JSON-RPC over pipes, the real server, tool schemas, guardrail
+    flags, `@mcp_tool` registration). Since FastMCP wraps every server exception into an error, it
+    classifies by message: a known clean-error phrasing is a tool error, anything else is a `crash`.
+
+  Both count only *actions* against the budget and separate an **expected tool error** (bad value /
+  not found / guardrail block — a signal the agent adapts to) from an **unexpected exception** (a
+  streamlit-mcp bug → `crash`).
 - **`task.py` / `tasks/`** — each task is a folder with `app.py` (a self-contained Streamlit app)
   and `task.py` (goal, a pure `check(state, output)` checker, difficulty tier, and an oracle
   `solution` the ScriptedAgent replays).
@@ -145,6 +156,9 @@ Three takeaways:
 - **M4 (done, ongoing)** — corpus expanded 3 → 9 across easy/medium/hard. It discriminates among
   sub-8B models and already found + fixed a library crash (0.3.12). Still needs *expert*-tier tasks
   (long horizons, real ambiguity, adversarial traps) to separate frontier models.
-- **M3** — drive via a real `fastmcp` stdio client (full-stack fidelity, not just the Engine);
-  guardrail tasks (a `--read-only` task that must be refused), semantic-tool tasks.
+- **M3 (done)** — `McpEnv`: drive via a real `fastmcp` stdio client (`--transport mcp`), spawning
+  `streamlit-mcp serve`. The oracle solves all 9 full-stack, 0 crashes; full-stack tests cover
+  `--read-only` enforcement and `@mcp_tool` exposure/blocking over the real transport
+  (`arena/tests/test_mcp.py`). Crash-detection over MCP is by error-message classification, since
+  FastMCP wraps server exceptions.
 - **later** — a Streamlit leaderboard viewer (which streamlit-mcp can itself drive — meta-dogfooding).
