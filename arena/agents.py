@@ -91,19 +91,7 @@ class RandomAgent(BaseAgent):
         return self.rng.choice(["hello", "42", "true", ""])  # text-ish
 
 
-class LLMAgent(BaseAgent):
-    """Milestone 2: an LLM reads the app over the tools and decides actions toward the goal.
-
-    Left as a clear seam so the harness is model-agnostic. A real implementation loops:
-    observe (list_widgets / read_output) -> think -> act (set_widget / click) -> repeat, and stops
-    when it judges the goal met or the budget is spent."""
-
-    name = "llm"
-
-    def __init__(self, model: str = "claude-opus-4-8"):
-        self.model = model
-
-    def solve(self, env: ArenaEnv, goal: str) -> None:  # pragma: no cover - Milestone 2
-        raise NotImplementedError(
-            "LLMAgent is Milestone 2 — wire an Anthropic tool-use loop over env's six tools."
-        )
+# LLMAgent (an Anthropic tool-use loop over the six tools) lives in arena/llm.py to keep the SDK
+# import lazy — scripted/random agents run with no `anthropic` dependency. Re-exported here so the
+# agent surface stays in one place.
+from .llm import LLMAgent  # noqa: E402,F401

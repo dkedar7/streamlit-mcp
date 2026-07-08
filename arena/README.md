@@ -21,6 +21,11 @@ uv run python -m arena list                     # list tasks
 uv run python -m arena run --agent scripted     # run the oracle (no API) — proves solvability
 uv run python -m arena run --agent random --seed 1   # fuzz baseline — stresses the library
 uv run python -m arena run --agent scripted --json   # also write arena/results/scripted.json
+
+# real model eval (needs ANTHROPIC_API_KEY with credits + the anthropic SDK):
+uv run --with anthropic python -m arena run --agent llm --model claude-sonnet-4-6 --json
+uv run --with anthropic python -m arena run --agent llm --model claude-haiku-4-5-20251001 --json
+uv run python -m arena leaderboard              # compare every run in arena/results/
 ```
 
 Example (oracle):
@@ -61,8 +66,11 @@ task (app.py + goal + checker + oracle)
 - **`task.py` / `tasks/`** — each task is a folder with `app.py` (a self-contained Streamlit app)
   and `task.py` (goal, a pure `check(state, output)` checker, difficulty tier, and an oracle
   `solution` the ScriptedAgent replays).
-- **`agents.py`** — `ScriptedAgent` (oracle replay, deterministic, CI-safe), `RandomAgent` (seeded
-  fuzz baseline), `LLMAgent` (Milestone 2).
+- **`agents.py` / `llm.py`** — `ScriptedAgent` (oracle replay, deterministic, CI-safe),
+  `RandomAgent` (seeded fuzz baseline), and `LLMAgent` — an Anthropic tool-use loop that inspects
+  with `list_widgets`/`read_output`, acts with `set_widget`/`click`, and calls `finish` when done.
+  Its client is injectable, so the loop is unit-tested with a fake client (no API key); in normal
+  use it reads `ANTHROPIC_API_KEY`. `arena leaderboard` compares runs across models.
 - **`runner.py` / `report.py` / `cli.py`** — episode loop, scoring, reports, `python -m arena`.
 
 ## Adding a task
@@ -90,8 +98,9 @@ the intended path and lets the ScriptedAgent prove the task is solvable).
 ## Roadmap
 
 - **M1 (done)** — env, task format, scripted + random agents, runner, report, 3 seed tasks.
-- **M2** — `LLMAgent`: an Anthropic tool-use loop over the six tools; run real models and build a
-  leaderboard.
+- **M2 (done)** — `LLMAgent`: an Anthropic tool-use loop over the six tools (injectable client,
+  fake-client tests), `--model` flag, per-model result files, and `arena leaderboard`. Run a live
+  model with `--agent llm --model <id>` once the API key has credits.
 - **M3** — drive via a real `fastmcp` stdio client (full-stack fidelity, not just the Engine);
   guardrail tasks (a `--read-only` task that must be refused), semantic-tool tasks.
 - **M4** — a wider task corpus across tiers; a Streamlit leaderboard viewer (which streamlit-mcp can
