@@ -95,31 +95,37 @@ arena/tasks/my_task/
 `("set", identifier, value)` / `("click", identifier)` actions that solves it (this both documents
 the intended path and lets the ScriptedAgent prove the task is solvable).
 
-## First results (2026-07-08, via OpenRouter)
+## Results (2026-07-08, via OpenRouter — 9 tasks)
 
-Seven models across five providers, each driving all three seed tasks:
+A snapshot across the full corpus (2 easy, 2 medium, 5 hard):
 
 | agent | solved | solve rate | crashes | avg actions |
 |---|---:|---:|---:|---:|
-| anthropic/claude-opus-4 | 3/3 | 100% | 0 | 3.33 |
-| anthropic/claude-haiku-4.5 | 3/3 | 100% | 0 | 3.33 |
-| openai/gpt-4o | 3/3 | 100% | 0 | 3.33 |
-| openai/gpt-4o-mini | 3/3 | 100% | 0 | 3.33 |
-| google/gemini-2.5-flash | 3/3 | 100% | 0 | 3.33 |
-| deepseek/deepseek-chat-v3.1 | 3/3 | 100% | 0 | 3.33 |
-| meta-llama/llama-3.3-70b-instruct | 3/3 | 100% | 0 | 3.33 |
-| scripted (oracle) | 3/3 | 100% | 0 | 3.33 |
-| random (fuzz) | 0/3 | 0% | 0 | 30.0 |
+| anthropic/claude-opus-4 | 9/9 | 100% | 0 | 3.0 |
+| anthropic/claude-haiku-4.5 | 9/9 | 100% | 0 | 3.0 |
+| google/gemini-2.5-flash | 9/9 | 100% | 0 | 3.0 |
+| openai/gpt-4o | 9/9 | 100% | 0 | 3.11 |
+| openai/gpt-4o-mini | 9/9 | 100% | 0 | 3.11 |
+| scripted (oracle) | 9/9 | 100% | 0 | 3.11 |
+| mistralai/ministral-3b | 8/9 | 89% | 0 | 3.78 |
+| google/gemini-2.5-flash-lite | 6/9 | 67% | 0 | 1.89 |
+| qwen/qwen-2.5-7b | 6/9 | 67% | 0 | 4.22 |
+| meta-llama/llama-3.1-8b | 3/9 | 33% | 0 | 1.56 |
+| meta-llama/llama-3.2-3b | 0/9 | 0% | 0 | 0.0 |
+| random (fuzz) | 0/9 | 0% | 0 | 30.0 |
 
-Two takeaways:
+Three takeaways:
 
-1. **Dogfooding: clean.** Seven real models generated dozens of tool calls (their own choice of
-   identifiers and values) against streamlit-mcp with **zero crashes** — the strongest evidence yet
-   that the driving surface is robust.
-2. **The seed corpus is saturated.** Every capable model — from `gpt-4o-mini` to `opus-4` — solves
-   all three at the *oracle-optimal* action count, so the benchmark can't yet discriminate among
-   strong models (only the random floor fails). **Harder tasks are the next priority** (see
-   Roadmap): longer horizons, larger widget trees, deceptive/near-miss goals, and error-recovery.
+1. **The corpus now discriminates — at the small end.** Solve rate spreads cleanly from 0% to 89%
+   across sub-8B models, so the harder tasks (arithmetic constraints, read-the-output reasoning,
+   large trees with distractors, error-recovery) do separate weaker agents.
+2. **Frontier models still saturate it.** Every capable model — `gpt-4o-mini` through `opus-4` —
+   still scores 100% at near-optimal efficiency. Bounded single-app operation is *easy* for them;
+   separating the top will need much longer horizons, real ambiguity, or adversarial traps.
+3. **The benchmark found a real streamlit-mcp bug.** Driving with `llama-3.1-8b` produced a
+   **crash** (`TypeError` from a `None` identifier) — an *unexpected* library exception, not a tool
+   error. It was fixed in streamlit-mcp **0.3.12**; the table above (post-fix) is back to 0 crashes.
+   This is exactly the dual purpose: a benchmark that also hardens the library.
 
 ## Interpreting results
 
@@ -136,9 +142,9 @@ Two takeaways:
 - **M2 (done)** — `LLMAgent` tool-use loop over the six tools (injectable client, fake-client
   tests); `--provider anthropic|openrouter`, `--model`, per-model result files, `arena leaderboard`.
   Verified live: 7 models across 5 providers via OpenRouter, 0 streamlit-mcp crashes.
-- **M4, pulled forward (next)** — a wider, HARDER task corpus. The seed tasks are saturated (every
-  strong model scores 100% at optimal efficiency), so the benchmark needs longer horizons, larger
-  widget trees, near-miss/deceptive goals, and error-recovery tasks to have signal.
+- **M4 (done, ongoing)** — corpus expanded 3 → 9 across easy/medium/hard. It discriminates among
+  sub-8B models and already found + fixed a library crash (0.3.12). Still needs *expert*-tier tasks
+  (long horizons, real ambiguity, adversarial traps) to separate frontier models.
 - **M3** — drive via a real `fastmcp` stdio client (full-stack fidelity, not just the Engine);
   guardrail tasks (a `--read-only` task that must be refused), semantic-tool tasks.
 - **later** — a Streamlit leaderboard viewer (which streamlit-mcp can itself drive — meta-dogfooding).
