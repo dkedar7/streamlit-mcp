@@ -22,9 +22,16 @@ uv run python -m arena run --agent scripted     # run the oracle (no API) — pr
 uv run python -m arena run --agent random --seed 1   # fuzz baseline — stresses the library
 uv run python -m arena run --agent scripted --json   # also write arena/results/scripted.json
 
-# real model eval (needs ANTHROPIC_API_KEY with credits + the anthropic SDK):
+# real model eval — Anthropic directly (needs ANTHROPIC_API_KEY + the anthropic SDK):
 uv run --with anthropic python -m arena run --agent llm --model claude-sonnet-4-6 --json
-uv run --with anthropic python -m arena run --agent llm --model claude-haiku-4-5-20251001 --json
+
+# ...or ANY model via OpenRouter (needs OPENROUTER_API_KEY + the openai SDK) — Claude, GPT,
+# Gemini, DeepSeek, Llama, … behind one API:
+uv run --with openai python -m arena run --agent llm --provider openrouter \
+    --model "openai/gpt-4o-mini" --json
+uv run --with openai python -m arena run --agent llm --provider openrouter \
+    --model "anthropic/claude-opus-4" --json
+
 uv run python -m arena leaderboard              # compare every run in arena/results/
 ```
 
@@ -67,10 +74,12 @@ task (app.py + goal + checker + oracle)
   and `task.py` (goal, a pure `check(state, output)` checker, difficulty tier, and an oracle
   `solution` the ScriptedAgent replays).
 - **`agents.py` / `llm.py`** — `ScriptedAgent` (oracle replay, deterministic, CI-safe),
-  `RandomAgent` (seeded fuzz baseline), and `LLMAgent` — an Anthropic tool-use loop that inspects
-  with `list_widgets`/`read_output`, acts with `set_widget`/`click`, and calls `finish` when done.
-  Its client is injectable, so the loop is unit-tested with a fake client (no API key); in normal
-  use it reads `ANTHROPIC_API_KEY`. `arena leaderboard` compares runs across models.
+  `RandomAgent` (seeded fuzz baseline), and `LLMAgent` — an LLM tool-use loop that inspects with
+  `list_widgets`/`read_output`, acts with `set_widget`/`click`, and calls `finish` when done. The
+  provider-specific bits live in a small `Backend`: `AnthropicBackend` (Messages API) and
+  `OpenAIBackend` (any OpenAI-compatible endpoint; used for **OpenRouter**, which proxies Claude /
+  GPT / Gemini / DeepSeek / Llama behind one API). The client is injectable, so the loop is
+  unit-tested with a fake client (no network). `arena leaderboard` compares runs across models.
 - **`runner.py` / `report.py` / `cli.py`** — episode loop, scoring, reports, `python -m arena`.
 
 ## Adding a task
@@ -86,6 +95,32 @@ arena/tasks/my_task/
 `("set", identifier, value)` / `("click", identifier)` actions that solves it (this both documents
 the intended path and lets the ScriptedAgent prove the task is solvable).
 
+## First results (2026-07-08, via OpenRouter)
+
+Seven models across five providers, each driving all three seed tasks:
+
+| agent | solved | solve rate | crashes | avg actions |
+|---|---:|---:|---:|---:|
+| anthropic/claude-opus-4 | 3/3 | 100% | 0 | 3.33 |
+| anthropic/claude-haiku-4.5 | 3/3 | 100% | 0 | 3.33 |
+| openai/gpt-4o | 3/3 | 100% | 0 | 3.33 |
+| openai/gpt-4o-mini | 3/3 | 100% | 0 | 3.33 |
+| google/gemini-2.5-flash | 3/3 | 100% | 0 | 3.33 |
+| deepseek/deepseek-chat-v3.1 | 3/3 | 100% | 0 | 3.33 |
+| meta-llama/llama-3.3-70b-instruct | 3/3 | 100% | 0 | 3.33 |
+| scripted (oracle) | 3/3 | 100% | 0 | 3.33 |
+| random (fuzz) | 0/3 | 0% | 0 | 30.0 |
+
+Two takeaways:
+
+1. **Dogfooding: clean.** Seven real models generated dozens of tool calls (their own choice of
+   identifiers and values) against streamlit-mcp with **zero crashes** — the strongest evidence yet
+   that the driving surface is robust.
+2. **The seed corpus is saturated.** Every capable model — from `gpt-4o-mini` to `opus-4` — solves
+   all three at the *oracle-optimal* action count, so the benchmark can't yet discriminate among
+   strong models (only the random floor fails). **Harder tasks are the next priority** (see
+   Roadmap): longer horizons, larger widget trees, deceptive/near-miss goals, and error-recovery.
+
 ## Interpreting results
 
 - **solve rate** — did the agent reach the goal? (The oracle should be 100%; a random agent near 0%
@@ -98,10 +133,12 @@ the intended path and lets the ScriptedAgent prove the task is solvable).
 ## Roadmap
 
 - **M1 (done)** — env, task format, scripted + random agents, runner, report, 3 seed tasks.
-- **M2 (done)** — `LLMAgent`: an Anthropic tool-use loop over the six tools (injectable client,
-  fake-client tests), `--model` flag, per-model result files, and `arena leaderboard`. Run a live
-  model with `--agent llm --model <id>` once the API key has credits.
+- **M2 (done)** — `LLMAgent` tool-use loop over the six tools (injectable client, fake-client
+  tests); `--provider anthropic|openrouter`, `--model`, per-model result files, `arena leaderboard`.
+  Verified live: 7 models across 5 providers via OpenRouter, 0 streamlit-mcp crashes.
+- **M4, pulled forward (next)** — a wider, HARDER task corpus. The seed tasks are saturated (every
+  strong model scores 100% at optimal efficiency), so the benchmark needs longer horizons, larger
+  widget trees, near-miss/deceptive goals, and error-recovery tasks to have signal.
 - **M3** — drive via a real `fastmcp` stdio client (full-stack fidelity, not just the Engine);
   guardrail tasks (a `--read-only` task that must be refused), semantic-tool tasks.
-- **M4** — a wider task corpus across tiers; a Streamlit leaderboard viewer (which streamlit-mcp can
-  itself drive — meta-dogfooding).
+- **later** — a Streamlit leaderboard viewer (which streamlit-mcp can itself drive — meta-dogfooding).
