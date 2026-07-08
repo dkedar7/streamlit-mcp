@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.11 (2026-07-07)
+
+- **Fix:** the CLI no longer mangles `text_input`/`text_area` values that look like JSON (#43).
+  `--set` JSON-parses values so typed widgets get real numbers/lists/booleans, but that parse was
+  applied unconditionally — so `Comment=true` on a text field became the boolean `True`, then was
+  `str()`-ified to `"True"`; `null`→`"None"`; a pasted `{"a": 1, "b": true}` came back as a Python
+  `repr` (`"{'a': 1, 'b': True}"`, no longer valid JSON). The same value over MCP is stored
+  verbatim, so this was silent data corruption on the most common widget kind **and** a human↔agent
+  parity break. The CLI now resolves the target widget kind first and passes the **raw string**
+  through for `text_input`/`text_area` (keeping JSON parsing for list/number/boolean widgets), so
+  `Comment=true` stores `"true"` — matching MCP.
+
 ## 0.3.10 (2026-07-06)
 
 - **Fix:** the `kind[index]` identifier that `list_widgets`/`get_layout`/`inspect` advertise for a

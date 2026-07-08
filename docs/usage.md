@@ -94,3 +94,8 @@ streamlit-mcp call app.py --read-only --set "Name=x"   # guardrail: blocked, exi
 streamlit-mcp call app.py --allow "Name" --set "Age=5"  # allow-list: 'Age' blocked, exit 1
 streamlit-mcp --version
 ```
+
+A `--set` value is JSON-parsed for typed widgets (so `Age=5` is a number, `Tags=["a","b"]` a
+list, `Agree=true` a boolean), but for a `text_input`/`text_area` it's stored **literally** — so
+`Comment=true` is the string `"true"`, not the boolean — matching what the same value stores over
+MCP.
