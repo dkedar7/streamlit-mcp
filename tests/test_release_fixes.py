@@ -461,6 +461,21 @@ def test_widgets_returned_in_declaration_order():
     assert [w.label for w in rt.snapshot().widgets] == ["1", "2", "3", "4", "5"]
 
 
+def test_non_string_identifier_is_clean_not_found_not_a_crash():
+    # a None/int/list identifier (e.g. an agent omitting the arg) must raise WidgetNotFound, not a
+    # raw TypeError from the kind[index] regex (#41). Found by StreamlitArena driving with a small model.
+    from streamlit_mcp.runtime import AppTestRuntime, WidgetNotFound
+    rt = AppTestRuntime(script="import streamlit as st\nst.number_input('Bid', 0, 250, 0, key='bid')\n")
+    rt.run()
+    for bad in (None, 123, ["x"]):
+        with pytest.raises(WidgetNotFound):
+            rt.set_widget(bad, 1)
+        with pytest.raises(WidgetNotFound):
+            rt.click(bad)
+    rt.set_widget("Bid", 250)  # valid identifier still resolves
+    assert rt.snapshot().session_state["bid"] == 250
+
+
 def test_document_order_holds_across_sidebar_and_columns():
     # parity: switching to a tree walk must not drop sidebar or nested (column) widgets
     from streamlit_mcp.runtime import AppTestRuntime
