@@ -84,6 +84,18 @@ def _split_assignment(item: str) -> tuple[str, Any]:
     return identifier.strip(), _parse_value(raw)
 
 
+def _text_targets(eng) -> set[str]:
+    """Every identifier/key/label that names a text_input/text_area — targets whose --set value
+    must be taken literally, never JSON-pre-parsed (#43)."""
+    text: set[str] = set()
+    for w in eng.list_widgets()["widgets"]:
+        if w["kind"] in ("text_input", "text_area"):
+            for name in (w.get("identifier"), w.get("key"), w.get("label")):
+                if name:
+                    text.add(name)
+    return text
+
+
 # --------------------------------------------------------------------- commands
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import serve
@@ -160,8 +172,17 @@ def cmd_call(args: argparse.Namespace) -> int:
         return 0
     try:
         eng = _engine(args)
+        text_targets = _text_targets(eng)
         for item in args.set or []:
-            ident, value = _split_assignment(item)
+            if "=" not in item:
+                raise ValueError(f"--set expects 'identifier=value', got {item!r}")
+            ident, raw = item.split("=", 1)
+            ident = ident.strip()
+            # A text_input/text_area stores the literal string the human typed. JSON pre-parsing it
+            # (true->True, null->None, {"a":1}->dict) would then be str()'d into a mangled value that
+            # diverges from MCP — which receives the string verbatim — a parity break + silent
+            # corruption on text fields (#43). Pre-parse only non-text targets (list/number/bool).
+            value = raw if ident in text_targets else _parse_value(raw)
             eng.set_widget(ident, value)
         for ident in args.click or []:
             eng.click(ident)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,12 +11,13 @@ APP = str(Path(__file__).parent / "apps" / "sample_app.py")
 UNSUPPORTED_APP = str(Path(__file__).parent / "apps" / "unsupported_app.py")
 
 
-# --- P1: text widget + JSON-looking value no longer crashes the CLI ---
-def test_text_widget_json_value_does_not_crash(capsys):
+# --- P1 / 0.3.11 #43: a JSON-looking value on a text widget is stored verbatim, not crashed
+# nor JSON-mangled (was "Hello, True!" — the CLI pre-parse turned 'true' into the bool True) ---
+def test_text_widget_json_value_stored_verbatim(capsys):
     from streamlit_mcp.cli import main
     rc = main(["call", APP, "--set", "Name=true", "--read"])
     assert rc == 0
-    assert "Hello, True!" in capsys.readouterr().out
+    assert "Hello, true!" in capsys.readouterr().out  # literal 'true', not 'True'
 
 
 # --- P1: allow-list resolves label<->key consistently ---
@@ -509,3 +511,53 @@ def test_every_advertised_identifier_resolves_and_maps_to_same_widget():
     # and every identifier snapshot advertises resolves to a real element
     for w in rt.snapshot().widgets:
         assert rt._find(_identifier(w))[1] is not None
+
+
+# --- 0.3.11 #43: CLI --set stores literal strings for text widgets (parity with MCP) ---
+def test_cli_text_widget_values_are_literal_not_json_mangled(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "t.py"
+    app.write_text("import streamlit as st\n"
+                   "st.text_input('Comment', key='comment')\n"
+                   "st.text_area('Config', key='config')\n")
+    cases = [("Comment", "comment", "true", "true"),
+             ("Comment", "comment", "false", "false"),
+             ("Comment", "comment", "null", "null"),
+             ("Config", "config", '{"a": 1, "b": true}', '{"a": 1, "b": true}')]
+    for label, key, value, expected in cases:
+        rc = main(["call", str(app), "--set", f"{label}={value}", "--state", "--json"])
+        assert rc == 0
+        state = json.loads(capsys.readouterr().out)
+        assert state[key] == expected                 # literal, not True/False/None/repr
+
+
+def test_cli_text_widget_matches_mcp_engine_value(tmp_path, capsys):
+    # parity: the CLI must store the same value the engine (MCP surface) stores for the same input
+    from streamlit_mcp.cli import main
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    script = "import streamlit as st\nst.text_input('Comment', key='comment')\n"
+    app = tmp_path / "t.py"
+    app.write_text(script)
+    rc = main(["call", str(app), "--set", "Comment=true", "--state", "--json"])
+    assert rc == 0
+    cli_value = json.loads(capsys.readouterr().out)["comment"]
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    mcp_out = Engine(rt).set_widget("comment", "true")  # MCP passes the string verbatim
+    assert cli_value == mcp_out["session_state"]["comment"] == "true"
+
+
+def test_cli_typed_widgets_still_json_parse(tmp_path, capsys):
+    # the JSON pre-parse must remain for non-text widgets (numbers, bools, lists)
+    from streamlit_mcp.cli import main
+    app = tmp_path / "typed.py"
+    app.write_text("import streamlit as st\n"
+                   "st.number_input('Age', value=0, key='age')\n"
+                   "st.checkbox('Agree', key='agree')\n"
+                   "st.multiselect('Tags', ['a', 'b', 'c'], key='tags')\n")
+    rc = main(["call", str(app), "--set", "Age=41", "--set", "Agree=true",
+               "--set", 'Tags=["a","c"]', "--state", "--json"])
+    assert rc == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state["age"] == 41 and state["agree"] is True and state["tags"] == ["a", "c"]
