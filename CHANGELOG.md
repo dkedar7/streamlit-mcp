@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.12 (2026-07-08)
+
+- **Fix:** `set_widget`/`click` with a **non-string identifier** (e.g. `None` or a number — an agent
+  that omits or nulls the `identifier` argument) now raise a clean `WidgetNotFound` instead of
+  crashing with `TypeError: expected string or bytes-like object`. The `kind[index]` resolver added
+  in #41 ran `re.fullmatch()` on the identifier; a `None`/int slipped past the key/label comparisons
+  and hit the regex, which raised a raw `TypeError`. `_find` now rejects a non-string identifier up
+  front. (Surfaced by the StreamlitArena benchmark, driving apps with a small model that emitted a
+  null identifier.)
+
 ## 0.3.11 (2026-07-07)
 
 - **Fix:** the CLI no longer mangles `text_input`/`text_area` values that look like JSON (#43).
