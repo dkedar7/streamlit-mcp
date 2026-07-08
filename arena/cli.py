@@ -44,7 +44,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         tasks = [t for t in tasks if t.id in set(args.task)]
         if not tasks:
             raise SystemExit(f"no matching tasks for {args.task}")
-    results = run_suite(tasks, _agent_factory(args.agent, args.seed, args.model, args.provider))
+    results = run_suite(tasks, _agent_factory(args.agent, args.seed, args.model, args.provider),
+                        transport=args.transport)
     print(to_markdown(results))
     if args.json:
         RESULTS_DIR.mkdir(exist_ok=True)
@@ -74,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     pl.set_defaults(func=cmd_list)
     pr = sub.add_parser("run", help="run tasks with an agent")
     pr.add_argument("--agent", default="scripted", help="scripted | random | llm")
+    pr.add_argument("--transport", default="engine", choices=["engine", "mcp"],
+                    help="engine (in-process, fast) | mcp (real streamlit-mcp serve, full-stack)")
     pr.add_argument("--provider", default="anthropic",
                     help="llm provider: anthropic | openrouter | openai")
     pr.add_argument("--model", default="claude-sonnet-4-6",

@@ -25,3 +25,4 @@ class Task:
     max_steps: int = 30
     tier: str = "easy"             # easy | medium | hard
     tags: tuple[str, ...] = field(default_factory=tuple)
+    server_args: tuple[str, ...] = field(default_factory=tuple)  # extra `serve` flags (mcp transport)
