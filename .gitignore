@@ -21,3 +21,6 @@ live_state.json
 # Secrets / local
 .env
 *.local
+
+# StreamlitArena generated results
+arena/results/
