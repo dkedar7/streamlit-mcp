@@ -315,6 +315,13 @@ class AppTestRuntime:
 
     def _find(self, identifier: str):
         self._ensure()
+        # A non-string identifier (None, an int, ...) can't name a widget — reject it cleanly up
+        # front. Otherwise it would sail past the key/label comparisons (and even wrongly match a
+        # keyless widget when it's None) and reach re.fullmatch(), which raises a raw TypeError
+        # instead of a clean WidgetNotFound. An agent that omits/nulls the identifier should get a
+        # normal "not found", not a crash.
+        if not isinstance(identifier, str):
+            raise WidgetNotFound(f"no widget matching {identifier!r}")
         # match on key first, then label (a widget is reachable by either, even though
         # _identifier advertises key-if-present-else-label)
         for by in ("key", "label"):
