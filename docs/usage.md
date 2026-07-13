@@ -43,16 +43,37 @@ Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_
 `time_input`, `color_picker`. Input widgets streamlit-mcp can't drive (`file_uploader`,
 `camera_input`, `chat_input`, `pills`, `segmented_control`, `feedback`, …) are reported
 explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
-dropped.
+dropped — wherever they're placed, including `st.sidebar.file_uploader(...)` and inside columns,
+tabs and containers.
+
+!!! note "Range widgets"
+    A `slider`, `select_slider` or `date_input` built with a tuple `value=` is a **two-handle
+    range** widget: its value is a 2-element list, and it advertises a matching array schema
+    (`{"type": "array", "items": …, "minItems": 2, "maxItems": 2}`), so send both handles —
+    `--set "Price=[20, 80]"`, `set_widget("Dates", ["2026-01-01", "2026-01-31"])`. Sending a single
+    value to one (or a list to a single-handle widget) is rejected rather than silently dropped.
+
+!!! note "Forms"
+    An `st.form` is driven the way a human drives it: set the fields, then click the form's submit
+    button (by its label, e.g. `--click "Submit"`). The submit button is reported as a regular
+    clickable `button`; clicking it commits the form and runs its body.
 
 !!! note "Atomic writes"
     Setting a `selectbox`/`radio`/`select_slider`/`multiselect` to an option that isn't offered
     (including every handle of a two-handle `select_slider` range), a
     `number_input`/`slider`/`date_input` outside its `min`/`max` (including either end of a
-    two-date range), or a `color_picker` to anything but a `#RGB`/`#RRGGBB` hex string, is
-    rejected **before** any state changes — with a clear error listing the valid
-    choices/range/format. An unparseable number, date, or time value is likewise rejected with a
-    clear message. A failed `set_widget` leaves the session usable and never silently mutates state.
+    two-date range), a value of the wrong **arity** (a single value for a two-handle range widget,
+    or a list for a single-handle one), a **fractional** value for an integer `number_input`, or a
+    `color_picker` to anything but a `#RGB`/`#RRGGBB` hex string, is rejected **before** any state
+    changes — with a clear error listing the valid choices/range/format. An unparseable number,
+    date, or time value is likewise rejected with a clear message. A failed `set_widget` leaves the
+    session usable and never silently mutates state.
+
+!!! note "Option types"
+    A widget built from non-string options (`st.selectbox("Pick", [1, 2, 3])`) advertises its
+    options in the string form Streamlit displays (`["1", "2", "3"]`) while reporting its value in
+    the real type (`1`) — that's what Streamlit's own testing API exposes. Both forms are accepted:
+    `set_widget("Pick", 2)` and `set_widget("Pick", "2")` both select the real option `2`.
 
 ## Custom semantic tools
 

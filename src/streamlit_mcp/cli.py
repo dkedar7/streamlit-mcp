@@ -17,7 +17,7 @@ from . import __version__
 from .decorator import registered_semantic_tools
 from .engine import Engine, guard_semantic_tool
 from .guardrails import Guardrails
-from .runtime import AppTestRuntime
+from .runtime import SUPPORTED_KINDS, AppTestRuntime
 
 
 def _force_utf8_output() -> None:
@@ -84,16 +84,51 @@ def _split_assignment(item: str) -> tuple[str, Any]:
     return identifier.strip(), _parse_value(raw)
 
 
-def _text_targets(eng) -> set[str]:
-    """Every identifier/key/label that names a text_input/text_area — targets whose --set value
-    must be taken literally, never JSON-pre-parsed (#43)."""
-    text: set[str] = set()
-    for w in eng.list_widgets()["widgets"]:
-        if w["kind"] in ("text_input", "text_area"):
-            for name in (w.get("identifier"), w.get("key"), w.get("label")):
-                if name:
-                    text.add(name)
-    return text
+def _set_targets(eng) -> dict[str, dict]:
+    """Every identifier/key/label an app's widgets answer to -> the widget model `--set` will
+    actually write to. `--set` needs the target's kind and options to know how to read the raw
+    value (see _resolve_value), so this must name the *same* widget the runtime will resolve:
+    it mirrors ``runtime._find`` — key before label, kinds in SUPPORTED_KINDS order, then the
+    ``kind[index]`` fallback. Otherwise an app with two same-named widgets of different kinds
+    would have its value parsed against one widget and written to the other."""
+    ranked = sorted(  # stable: document order is preserved within a kind
+        eng.list_widgets()["widgets"], key=lambda w: SUPPORTED_KINDS.index(w["kind"])
+    )
+    targets: dict[str, dict] = {}
+    for by in ("key", "label"):
+        for w in ranked:
+            if w.get(by):
+                targets.setdefault(w[by], w)
+    for w in ranked:
+        targets.setdefault(w["identifier"], w)
+    return targets
+
+
+def _resolve_value(w: Optional[dict], raw: str) -> Any:
+    """What `--set identifier=raw` means for this target widget.
+
+    `--set` JSON-parses values so typed widgets get real numbers, lists and booleans — but that
+    parse is wrong whenever the widget wants the text as written:
+
+    * a **text_input/text_area** stores the literal string the human typed, so `Comment=true` must
+      stay `"true"` and not become the boolean `True` (then `str()`-ified into a mangled `"True"`,
+      diverging from MCP, which receives the string verbatim) — #43;
+    * an **option widget whose options are genuinely strings that look like JSON tokens**
+      (`["true","false"]`, a `["1","2","3"]` version picker) otherwise cannot be set to its own
+      option at all: `Env=true` pre-parsed to `True` matches no option and is rejected as invalid —
+      while the identical string sent over MCP is accepted. A CLI-only failure on a common widget
+      class, and a human<->agent parity break (#54).
+
+    So: a text field takes the raw string; for anything else, an exact match against one of the
+    widget's advertised options wins over the JSON parse; failing that, JSON as before (which is
+    what keeps `Rng=[5,95]`, `Tags=[]` and `Age=42` working)."""
+    if w is None:  # unknown target — let the engine raise WidgetNotFound
+        return _parse_value(raw)
+    if w["kind"] in ("text_input", "text_area"):
+        return raw
+    if any(raw == str(o) for o in w.get("constraints", {}).get("options") or ()):
+        return raw
+    return _parse_value(raw)
 
 
 # --------------------------------------------------------------------- commands
@@ -172,18 +207,13 @@ def cmd_call(args: argparse.Namespace) -> int:
         return 0
     try:
         eng = _engine(args)
-        text_targets = _text_targets(eng)
+        targets = _set_targets(eng)
         for item in args.set or []:
             if "=" not in item:
                 raise ValueError(f"--set expects 'identifier=value', got {item!r}")
             ident, raw = item.split("=", 1)
             ident = ident.strip()
-            # A text_input/text_area stores the literal string the human typed. JSON pre-parsing it
-            # (true->True, null->None, {"a":1}->dict) would then be str()'d into a mangled value that
-            # diverges from MCP — which receives the string verbatim — a parity break + silent
-            # corruption on text fields (#43). Pre-parse only non-text targets (list/number/bool).
-            value = raw if ident in text_targets else _parse_value(raw)
-            eng.set_widget(ident, value)
+            eng.set_widget(ident, _resolve_value(targets.get(ident), raw))
         for ident in args.click or []:
             eng.click(ident)
         result = eng.get_state() if args.state else eng.read_output()

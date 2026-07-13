@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.4.0 (2026-07-13)
+
+Five fixes from the nightly dogfood routine, all of the same family: the widget model lost
+**type, arity, or placement** fidelity, so a value an agent read back could not be sent back.
+
+- **Fix:** a widget built from **non-string options** (`st.selectbox("Pick", [1, 2, 3])` — a very
+  common pattern) can now be set to its natural typed value (#51). AppTest stringifies a widget's
+  options but reports its value in the real type, so such a widget advertised
+  `options: ["1","2","3"]` while reading back `value: 1` — and `_validate_choice` compared the
+  incoming value against the *stringified* options, rejecting `2` (a genuine option, and the same
+  type as the value the tool had just advertised) as "not a valid option". The whole class of
+  numeric/non-string-option widgets was undrivable on the CLI and misrepresented over MCP, breaking
+  the `list_widgets` → `set_widget` round-trip. Membership is now compared on the string form of
+  both sides, so **both** the typed value (`2`) and the option's string form (`"2"`) are accepted —
+  AppTest resolves either to the real option. A value that genuinely isn't an option is still
+  rejected. (Also: a **fractional value on an integer `number_input`** — `Score=30.5`, which
+  AppTest silently truncated to `30` while reporting success — is now rejected up front.)
+
+- **Fix:** unsupported widgets placed through a **container accessor** are no longer silently
+  dropped (#52). `detect_unsupported` regex-scanned the source for the literal `st.<name>(` form,
+  so `st.sidebar.file_uploader(...)`, `col.camera_input(...)`, `container.download_button(...)` and
+  `tab.data_editor(...)` — the sidebar and columns idioms most real apps are built from — matched
+  nothing and were reported nowhere, on any surface. That is exactly the failure the "never
+  silently dropped" guarantee exists to prevent: an agent introspecting such an app got no
+  indication the widget existed. The scan now parses the source as an **AST** and matches the call
+  node's attribute, so any receiver is caught (including an aliased `import streamlit as sl`), and
+  occurrences in comments and string literals — previously reported as real — no longer are.
+  (The runtime element tree can't serve as the detector: AppTest names nodes after their protobuf
+  type, so `st.data_editor` arrives as `dataframe`, indistinguishable from a plain `st.dataframe`
+  output, and pills/segmented_control/feedback all collapse into `button_group`.)
+
+- **Fix:** `st.form` is now a **supported flow**, and `form_submit_button` is no longer
+  double-reported (#53). It was listed *both* as a supported, clickable `button` **and** as
+  `unsupported` with the reason "drive it another way" — which was simply false: clicking it
+  submits the form and runs its body, over the CLI and MCP alike. An agent reading `get_layout`
+  reasonably concluded it could not submit the form, and gave up on an interaction it was fully
+  capable of performing. `form_submit_button` is dropped from `UNSUPPORTED_ELEMENTS`; a form is
+  driven the way a human drives it — set the fields, then click the submit button.
+
+- **Fix:** the CLI no longer JSON-pre-parses a `--set` value that **is one of the widget's own
+  options** (#54). An option widget whose options are genuinely strings that look like JSON tokens
+  (`["true","false"]`, a `["1","2","3"]` version picker) could not be set from the CLI at all:
+  `--set "Env=true"` was pre-parsed to the boolean `True`, matched no option, and was rejected —
+  while the identical string sent over MCP was accepted. A CLI-only failure on a common widget
+  class, and a human↔agent parity break; the only way through was to guess the `--set 'Env="true"'`
+  quoting trick. This is the #43 class (CLI JSON pre-parse corrupting a value that should be a
+  literal string), which #43 fixed only for `text_input`/`text_area`. `--set` now prefers an exact
+  match against the target's advertised options over the JSON parse (`Rng=[5,95]`, `Tags=[]` and
+  `Age=41` keep parsing as before).
+
+- **Fix:** two-handle **range** widgets (`st.slider("P", 0, 100, (20, 80))`,
+  `st.select_slider(..., value=("s","l"))`, `st.date_input(..., value=(d1, d2))`) now advertise a
+  range, and a wrong-arity value is rejected instead of silently discarded (#55). They hold a
+  2-element list but advertised the **scalar** schema of their single-handle form, so nothing in
+  the model said the widget was a range — and a schema-following agent that sent the scalar it was
+  told to send had its write **silently thrown away** (slider/select_slider reverted to the prior
+  value; a date range degraded to a one-element range) while `set_widget` reported success. The
+  schema is now range-aware (`{"type": "array", "items": …, "minItems": 2, "maxItems": 2}`), and
+  `set_widget` validates **arity** up front, in both directions — a single value sent to a range
+  widget, and a list sent to a single-handle one, are both rejected with a clear error, leaving the
+  prior value untouched. This closes the silent-revert class (#10/#12/#31/#33) for the arity case:
+  those validators guarded a value's *content*, leaving its *shape* unchecked.
+
+**Behavior changes** (why this is a minor bump, not a patch): range widgets advertise an array
+schema instead of a scalar one; `form_submit_button` moves from `unsupported` to a supported
+`button`; `set_widget` now rejects two inputs it previously accepted and then discarded (a
+wrong-arity value, and a fractional value on an integer `number_input`); and an unsupported element
+that appears only in a comment or a string literal is no longer reported. Every new rejection
+replaces a silent failure — nothing that used to apply cleanly stops applying.
+
 ## 0.3.12 (2026-07-08)
 
 - **Fix:** `set_widget`/`click` with a **non-string identifier** (e.g. `None` or a number — an agent
