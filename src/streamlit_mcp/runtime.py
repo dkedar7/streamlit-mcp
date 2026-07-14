@@ -53,6 +53,16 @@ SUPPORTED_KINDS = (
 OUTPUT_KINDS = ("title", "header", "subheader", "markdown", "caption", "text")
 
 
+def _display(value: Any) -> str:
+    """A value as it should read in an error message an agent or human acts on: dates and times as
+    the ISO strings they're set with, not ``datetime.date(2026, 1, 1)`` Python reprs."""
+    if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
+        return repr(value.isoformat())
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_display(v) for v in value) + "]"
+    return repr(value)
+
+
 class RuntimeError_(Exception):
     """Base error for runtime operations."""
 
@@ -217,10 +227,14 @@ class AppTestRuntime:
         # and the pending bad value poisons every later call (#10); an out-of-range *number/
         # slider/date* does the opposite — AppTest silently resets it to the widget default
         # and run() does NOT raise, so it must be caught up front too (#12). A bad *color*
-        # reverts the same silent way (#31), so it needs its own up-front check as well.
+        # reverts the same silent way (#31), so it needs its own up-front check as well. So does
+        # a wrong *arity* — a scalar sent to a two-handle range widget, or vice versa (#55) — and
+        # a *fractional* value on an integer number_input, which AppTest truncates (#51).
+        self._validate_arity(kind, identifier, el, coerced)
         self._validate_choice(kind, el, coerced)
         self._validate_range(kind, el, coerced)
         self._validate_color(kind, coerced)
+        self._validate_number(kind, identifier, el, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
@@ -243,28 +257,81 @@ class AppTestRuntime:
 
     # ----------------------------------------------------------------- helpers
     @staticmethod
+    def _validate_arity(kind: str, identifier: str, el, value: Any) -> None:
+        """Reject a value whose ARITY doesn't match the widget, before it is written to AppTest.
+
+        A slider/select_slider/date_input built with a tuple ``value=`` is a two-handle *range*
+        widget holding a list; the single-handle form of each holds a scalar. AppTest normalizes an
+        arity mismatch away without raising — a scalar sent to a range slider/select_slider reverts
+        to the prior value, a list sent to a single one is dropped, and a scalar sent to a date
+        range degrades it to a one-element range — so the rollback net never fires and the write
+        silently vanishes (or half-lands) while set_widget reports success (#55). That is the arity
+        sibling of the value-mismatch silent reverts closed in #12/#31/#33, and it has to be caught
+        the same way: up front. Checked in both directions, since both revert silently."""
+        if kind not in ("slider", "select_slider", "date_input"):
+            return
+        current = getattr(el, "value", None)
+        is_range = isinstance(current, (list, tuple))
+        given_list = isinstance(value, (list, tuple))
+        if is_range and not given_list:
+            raise RuntimeError_(
+                f"{identifier!r} is a two-handle range {kind}: its value is a list "
+                f"(currently {_display(current)}), but {_display(value)} is a single value — send "
+                f"both handles as a 2-element list, e.g. [low, high]"
+            )
+        if given_list and not is_range:
+            raise RuntimeError_(
+                f"{identifier!r} is a single-value {kind} (currently {_display(current)}), but "
+                f"{_display(value)} is a list — send one value, not a range"
+            )
+        if not is_range:
+            return
+        # A slider/select_slider range has exactly two handles. A date range is Streamlit's own
+        # partial-selection model (it legitimately holds 0, 1, or 2 dates), so only an over-long
+        # list is wrong there — a caller passing one date explicitly asked for a half-open range.
+        n = len(value)
+        if kind in ("slider", "select_slider") and n != 2:
+            raise RuntimeError_(
+                f"{identifier!r} is a two-handle range {kind}; expected 2 values, got {n}: "
+                f"{_display(value)}"
+            )
+        if kind == "date_input" and n > 2:
+            raise RuntimeError_(
+                f"{identifier!r} is a date range; expected at most 2 dates, got {n}"
+            )
+
+    @staticmethod
     def _validate_choice(kind: str, el, value: Any) -> None:
         """Reject a selectbox/radio/select_slider/multiselect value that isn't an offered
-        option, before it is written to AppTest. Skipped when the widget exposes no options."""
+        option, before it is written to AppTest. Skipped when the widget exposes no options.
+
+        Membership is compared on the *string form* of both sides. AppTest stringifies a widget's
+        options (Streamlit formats them with ``str`` for the accessor) but reports its value in the
+        real type, so a widget built from non-string options — ``st.selectbox("Pick", [1, 2, 3])``,
+        a very common pattern — advertises ``options ['1','2','3']`` while reading back ``value 1``.
+        A literal ``value not in options`` check then rejected the natural typed value the tool had
+        just advertised, breaking the list_widgets -> set_widget round-trip for that whole class of
+        widget (#51). AppTest resolves either form to the real option (``set_value(2)`` and
+        ``set_value("2")`` both land on the int ``2``), so both are accepted here."""
         options = list(getattr(el, "options", []) or [])
-        if not options:
+        if not options or kind not in ("selectbox", "radio", "select_slider", "multiselect"):
+            return
+        offered = {str(o) for o in options}
+        # multiselect carries a list of values; select_slider a single value OR a (lo, hi) range;
+        # selectbox/radio a single value. Every element must be an offered option — the range form
+        # used to be skipped, so a bad handle silently reverted while reporting success (#33).
+        many = kind in ("select_slider", "multiselect")
+        values = list(value) if many and isinstance(value, (list, tuple)) else [value]
+        invalid = [v for v in values if str(v) not in offered]
+        if not invalid:
             return
         if kind in ("selectbox", "radio"):
-            if value not in options:
-                raise RuntimeError_(
-                    f"{value!r} is not a valid option for {kind}; choose one of {options}"
-                )
-        elif kind in ("select_slider", "multiselect"):
-            # Both carry multiple values against a fixed option list: multiselect a list,
-            # select_slider a single value OR a (lo, hi) range. Every element must be an
-            # offered option — the range form used to be skipped, so a bad handle silently
-            # reverted while reporting success (#33).
-            values = list(value) if isinstance(value, (list, tuple)) else [value]
-            invalid = [v for v in values if v not in options]
-            if invalid:
-                raise RuntimeError_(
-                    f"{invalid!r} are not valid options for {kind}; choose from {options}"
-                )
+            raise RuntimeError_(
+                f"{value!r} is not a valid option for {kind}; choose one of {options}"
+            )
+        raise RuntimeError_(
+            f"{invalid!r} are not valid options for {kind}; choose from {options}"
+        )
 
     @staticmethod
     def _validate_range(kind: str, el, value: Any) -> None:
@@ -285,6 +352,24 @@ class AppTestRuntime:
                 raise RuntimeError_(f"{v!r} is out of range for {kind}: minimum is {lo!r}")
             if above:
                 raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
+
+    @staticmethod
+    def _validate_number(kind: str, identifier: str, el, value: Any) -> None:
+        """Reject a fractional value for an *integer* number_input before it is written. AppTest
+        truncates it (30.5 -> 30) without raising, so set_widget stored a value the caller never
+        asked for and reported success — the silent-corruption sibling of #12/#55, noted while
+        fixing #51. An integral float (30.0) is lossless, so it passes."""
+        if kind != "number_input":
+            return
+        current = getattr(el, "value", None)
+        # bool is an int subclass; a float number_input takes fractional values fine.
+        if isinstance(current, bool) or not isinstance(current, int):
+            return
+        if isinstance(value, float) and not value.is_integer():
+            raise RuntimeError_(
+                f"{value!r} is not a valid value for the integer number_input {identifier!r}; it "
+                f"would be truncated to {int(value)!r} — send a whole number"
+            )
 
     # A color_picker accepts only a #RGB / #RRGGBB hex string. AppTest normalizes anything
     # else (a bad hex, a CSS name, a wrong-length string) back to the widget default without
@@ -403,7 +488,10 @@ class AppTestRuntime:
                     ) from None
         if kind in ("checkbox", "toggle"):
             return cls._to_bool(kind, value)
-        if kind == "multiselect" and isinstance(value, str):
+        if kind == "multiselect" and not isinstance(value, (list, tuple)):
+            # a multiselect holds a list; a bare option ("a", or the int 1 for an int-option
+            # widget) means "select just this one" — wrap it rather than handing AppTest a scalar
+            # it would choke on iterating
             return [value]
         if kind in ("text_input", "text_area") and not isinstance(value, str):
             # a JSON-typed value (True/41/None) bound for a text field becomes its string

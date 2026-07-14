@@ -80,10 +80,16 @@ transport for local clients.
 | `get_state()` | the app's `session_state` |
 
 Supported widgets: text_input, number_input, text_area, slider, select_slider, selectbox,
-multiselect, checkbox, toggle, radio, button, date_input, time_input, color_picker. Input
-widgets streamlit-mcp can't drive (file_uploader, camera_input, chat_input, pills,
+multiselect, checkbox, toggle, radio, button, date_input, time_input, color_picker — including
+their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
+`st.date_input("Dates", (start, end))`), which advertise a 2-element array schema and take
+`[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
+form's submit button.
+
+Input widgets streamlit-mcp can't drive (file_uploader, camera_input, chat_input, pills,
 segmented_control, feedback, …) are reported explicitly on every surface (text `--layout`,
-`--json`, MCP `get_layout`), never silently dropped.
+`--json`, MCP `get_layout`), never silently dropped — wherever they're placed, including
+`st.sidebar.file_uploader(...)` and inside columns, tabs and containers.
 
 ## Custom semantic tools
 

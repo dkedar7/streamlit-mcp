@@ -576,3 +576,324 @@ def test_cli_typed_widgets_still_json_parse(tmp_path, capsys):
     assert rc == 0
     state = json.loads(capsys.readouterr().out)
     assert state["age"] == 41 and state["agree"] is True and state["tags"] == ["a", "c"]
+
+
+# --- 0.4.0 #51: non-string options — the natural typed value round-trips, not falsely rejected ---
+TYPED_OPTIONS_APP = (
+    "import streamlit as st\n"
+    "st.selectbox('Pick', [1, 2, 3], key='pick')\n"
+    "st.radio('Rate', [10, 20, 30], key='rate')\n"
+    "st.multiselect('Nums', [1, 2, 3], key='nums')\n"
+    "st.select_slider('Size', options=[10, 20, 30], key='size')\n"
+)
+
+
+@pytest.mark.parametrize(
+    "identifier,value,expected",
+    [
+        ("pick", 2, 2),        # the natural typed value the tool itself advertises (value: 1)
+        ("pick", "2", 2),      # the stringified option form — both resolve to the real option
+        ("rate", 20, 20),
+        ("nums", [1, 3], [1, 3]),
+        ("nums", 1, [1]),      # a bare option means "select just this one"
+        ("size", 30, 30),
+    ],
+)
+def test_non_string_options_accept_the_typed_value(identifier, value, expected):
+    """AppTest stringifies a widget's options but reports its value in the real type, so a widget
+    built from non-string options advertised options ['1','2','3'] while reading back value 1 — and
+    the literal membership check then rejected the very value it advertised, breaking the
+    list_widgets -> set_widget round-trip for that whole class of widget (#51)."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    rt.set_widget(identifier, value)
+    assert rt.snapshot().session_state[identifier] == expected
+
+
+@pytest.mark.parametrize("identifier,value", [("pick", 9), ("rate", 99), ("nums", [1, 9])])
+def test_non_string_options_still_reject_a_real_non_option(identifier, value):
+    """String-normalizing membership must not open the gate to values that aren't options."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="not valid options|is not a valid option"):
+        rt.set_widget(identifier, value)
+
+
+def test_every_advertised_value_is_settable_back_verbatim():
+    """The round-trip guarantee, stated directly: every value list_widgets advertises can be sent
+    straight back to set_widget."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    eng = Engine(rt)
+    for w in eng.list_widgets()["widgets"]:
+        eng.set_widget(w["identifier"], w["value"])  # must not raise
+
+
+def test_int_number_input_rejects_a_fractional_value():
+    """AppTest truncates 30.5 -> 30 on an integer number_input without raising, so set_widget
+    stored a value the caller never asked for and reported success (noted while fixing #51)."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    script = "import streamlit as st\nst.number_input('Score', 0, 100, 5, key='score')\n"
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="truncated"):
+        rt.set_widget("score", 30.5)
+    assert rt.snapshot().session_state["score"] == 5  # untouched
+    rt.set_widget("score", 30.0)  # an integral float is lossless -> allowed
+    assert rt.snapshot().session_state["score"] == 30
+
+
+# --- 0.4.0 #52: an unsupported widget placed via a container accessor is reported, not dropped ---
+ACCESSOR_APP = (
+    "import streamlit as st\n"
+    "import streamlit as sl\n"
+    "st.sidebar.file_uploader('Sidebar upload')\n"
+    "col1, col2 = st.columns(2)\n"
+    "col1.camera_input('Col camera')\n"
+    "box = st.container()\n"
+    "box.download_button('DL', data='x')\n"
+    "tab1, = st.tabs(['T'])\n"
+    "tab1.data_editor({'a': [1, 2]})\n"
+    "sl.chat_input('Aliased')\n"
+    "st.dataframe({'b': [3]})\n"                      # a plain OUTPUT — must not be reported
+    "# st.pills('commented out', ['x'])\n"            # a comment — must not be reported
+    "note = 'st.audio_input(inside a string)'\n"      # a string — must not be reported
+)
+
+
+def test_accessor_placed_unsupported_widgets_are_reported():
+    """The old regex anchored on the bare `st.<name>(` form, so every unsupported widget placed
+    through a container accessor — the ubiquitous sidebar/columns idioms — was silently dropped
+    from `unsupported` on every surface, breaking the headline guarantee (#52)."""
+    from streamlit_mcp.elements import detect_unsupported_source
+    found = {u["element"] for u in detect_unsupported_source(ACCESSOR_APP)}
+    assert {"file_uploader", "camera_input", "download_button", "data_editor"} <= found
+    assert "chat_input" in found  # reached through an aliased import, too
+
+
+def test_source_scan_ignores_comments_strings_and_plain_outputs():
+    """Scanning the AST rather than the raw text also drops the old false positives."""
+    from streamlit_mcp.elements import detect_unsupported_source
+    found = {u["element"] for u in detect_unsupported_source(ACCESSOR_APP)}
+    assert "pills" not in found        # commented out
+    assert "audio_input" not in found  # inside a string literal
+    assert "dataframe" not in found    # st.dataframe is a supported output, not st.data_editor
+
+
+def test_unsupported_agrees_across_every_surface(tmp_path, capsys):
+    """--layout text, --json and MCP get_layout must agree (they share detect_unsupported)."""
+    from streamlit_mcp.cli import main
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    app = tmp_path / "accessor.py"
+    app.write_text(ACCESSOR_APP)
+    assert main(["inspect", str(app), "--layout", "--json"]) == 0
+    from_json = {u["element"] for u in json.loads(capsys.readouterr().out)["unsupported"]}
+    assert main(["inspect", str(app), "--layout"]) == 0
+    text = capsys.readouterr().out
+    rt = AppTestRuntime(str(app))
+    rt.run()
+    from_mcp = {u["element"] for u in Engine(rt, app_path=str(app)).get_layout()["unsupported"]}
+    assert from_json == from_mcp
+    assert "file_uploader" in from_json
+    for element in from_json:
+        assert element in text
+
+
+def test_unparseable_source_still_reports_rather_than_reporting_nothing():
+    from streamlit_mcp.elements import detect_unsupported_source
+    broken = "import streamlit as st\nst.file_uploader('x'\n"  # syntax error: unclosed paren
+    assert [u["element"] for u in detect_unsupported_source(broken)] == ["file_uploader"]
+
+
+# --- 0.4.0 #53: form_submit_button is a supported, clickable button — not "unsupported" ---
+FORM_APP = (
+    "import streamlit as st\n"
+    "with st.form('f'):\n"
+    "    name = st.text_input('Name', key='name')\n"
+    "    age = st.slider('Age', 0, 100, 10, key='age')\n"
+    "    submitted = st.form_submit_button('Submit')\n"
+    "if submitted:\n"
+    "    st.session_state['result'] = f'{name} is {age}'\n"
+)
+
+
+def test_form_submit_button_is_not_reported_unsupported():
+    """It was reported as a supported clickable button AND as unsupported with a 'drive it another
+    way' reason that was simply false — steering agents off the working st.form flow (#53)."""
+    from streamlit_mcp.elements import detect_unsupported_source
+    assert detect_unsupported_source(FORM_APP) == []
+
+
+def test_form_is_drivable_set_the_fields_then_click_submit():
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=FORM_APP)
+    rt.run()
+    eng = Engine(rt)
+    buttons = [w for w in eng.list_widgets()["widgets"] if w["action"]]
+    assert len(buttons) == 1  # reported once, as a button
+    eng.set_widget("name", "agent")
+    eng.set_widget("age", 42)
+    eng.click("Submit")
+    assert eng.get_state()["result"] == "agent is 42"
+
+
+# --- 0.4.0 #54: CLI --set no longer JSON-pre-parses a value that IS one of the widget's options ---
+JSONISH_OPTIONS_APP = (
+    "import streamlit as st\n"
+    "st.selectbox('Env', ['true', 'false'], key='env')\n"
+    "st.selectbox('Ver', ['1', '2', '3'], key='ver')\n"
+    "st.radio('Mode', ['yes', 'no'], key='mode')\n"
+)
+
+
+@pytest.mark.parametrize("assignment,key,expected", [
+    ("Env=true", "env", "true"),   # a genuinely-string option that looks like a JSON token
+    ("Env=false", "env", "false"),
+    ("Ver=2", "ver", "2"),         # a numeric-string version picker
+    ("Mode=yes", "mode", "yes"),   # the control: never a JSON token, always worked
+])
+def test_cli_sets_string_options_that_look_like_json(tmp_path, capsys, assignment, key, expected):
+    """The CLI JSON-pre-parsed 'true'->True and '2'->2 before validation, so a value that IS one of
+    the widget's own options was rejected as invalid — while the identical string sent over MCP was
+    accepted. A CLI-only failure on a common widget class, and a human<->agent parity break (#54)."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "opts.py"
+    app.write_text(JSONISH_OPTIONS_APP)
+    assert main(["call", str(app), "--set", assignment, "--state", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)[key] == expected
+
+
+def test_cli_and_mcp_store_the_same_value_for_a_jsonish_option(tmp_path, capsys):
+    """Parity, stated directly: the CLI and MCP store the same value for the same intent."""
+    from streamlit_mcp.cli import main
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    app = tmp_path / "opts.py"
+    app.write_text(JSONISH_OPTIONS_APP)
+    assert main(["call", str(app), "--set", "Env=true", "--state", "--json"]) == 0
+    cli_value = json.loads(capsys.readouterr().out)["env"]
+    rt = AppTestRuntime(script=JSONISH_OPTIONS_APP)
+    rt.run()
+    mcp_value = Engine(rt).set_widget("env", "true")["session_state"]["env"]
+    assert cli_value == mcp_value == "true"
+
+
+def test_cli_still_rejects_a_value_that_is_not_an_option(tmp_path):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "opts.py"
+    app.write_text(JSONISH_OPTIONS_APP)
+    assert main(["call", str(app), "--set", "Env=maybe", "--state"]) == 1
+
+
+# --- 0.4.0 #55: range widgets advertise a range, and a wrong-arity value is rejected atomically ---
+ARITY_APP = (
+    "import streamlit as st, datetime\n"
+    "st.slider('Rng', 0, 100, (20, 80), key='rng')\n"
+    "st.slider('Single', 0, 100, 10, key='single')\n"
+    "st.select_slider('SizeRange', options=['s', 'm', 'l', 'xl'], value=('s', 'l'), key='ssr')\n"
+    "st.date_input('DateRange', value=(datetime.date(2026, 1, 1),"
+    " datetime.date(2026, 1, 31)), key='dr')\n"
+)
+
+
+def test_range_widget_advertises_an_array_schema():
+    """Every range widget advertised the same SCALAR schema as its single-handle form, so a
+    schema-following agent could not construct a valid set from what it was told (#55)."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    schemas = {w["identifier"]: w["schema"]["properties"]["value"]
+               for w in Engine(rt).list_widgets()["widgets"]}
+    for ident in ("rng", "ssr", "dr"):
+        assert schemas[ident]["type"] == "array", ident
+        assert schemas[ident]["minItems"] == schemas[ident]["maxItems"] == 2, ident
+    assert schemas["rng"]["items"]["type"] == "number"
+    assert schemas["ssr"]["items"]["enum"] == ["s", "m", "l", "xl"]
+    assert schemas["dr"]["items"]["format"] == "date"
+    assert schemas["single"]["type"] == "number"  # the single-handle form is unchanged
+
+
+@pytest.mark.parametrize("identifier,scalar", [
+    ("rng", 50),           # was silently reverted to the prior value, reporting success
+    ("ssr", "m"),          # same
+    ("dr", "2026-01-15"),  # worse: silently degraded the range to a 1-element value
+])
+def test_scalar_sent_to_a_range_widget_is_rejected_not_silently_discarded(identifier, scalar):
+    """AppTest normalizes an arity mismatch away WITHOUT raising, so the rollback net never fired
+    and the write vanished while set_widget reported success — the silent-revert class of
+    #10/#12/#31/#33, left open for the range/arity case (#55)."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    before = rt.snapshot().session_state[identifier]
+    with pytest.raises(RuntimeError_, match="range"):
+        rt.set_widget(identifier, scalar)
+    assert rt.snapshot().session_state[identifier] == before  # atomic: prior value untouched
+
+
+def test_list_sent_to_a_single_handle_widget_is_rejected():
+    """The hole is bidirectional — AppTest drops a list sent to a single-handle slider just as
+    silently as it drops a scalar sent to a range one."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="single-value"):
+        rt.set_widget("single", [5, 95])
+    assert rt.snapshot().session_state["single"] == 10
+
+
+def test_wrong_length_range_is_rejected():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="expected 2 values"):
+        rt.set_widget("rng", [10, 50, 90])
+
+
+def test_valid_range_sets_still_apply():
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    rt.set_widget("rng", [5, 95])
+    rt.set_widget("ssr", ["m", "xl"])
+    rt.set_widget("dr", ["2026-02-01", "2026-02-28"])
+    rt.set_widget("single", 42)
+    state = rt.snapshot().session_state
+    assert list(state["rng"]) == [5, 95]
+    assert list(state["ssr"]) == ["m", "xl"]
+    assert state["single"] == 42
+
+
+def test_range_error_message_shows_iso_dates_not_python_reprs():
+    """The message an agent has to act on shouldn't be full of datetime.date(2026, 1, 1) reprs."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=ARITY_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_) as excinfo:
+        rt.set_widget("dr", "2026-01-15")
+    message = str(excinfo.value)
+    assert "'2026-01-01'" in message and "datetime.date(" not in message
+
+
+def test_cli_parses_the_value_against_the_widget_it_actually_writes(tmp_path, capsys):
+    """--set reads the raw value against the target's kind/options, so the model it consults must
+    name the same widget the runtime resolves. In an app with two same-named widgets of different
+    kinds, runtime._find picks by SUPPORTED_KINDS order (text_input before selectbox), so the CLI
+    must too — indexing them in document order would parse 'true' against the selectbox (JSON ->
+    True), then write it to the text_input as the mangled "True", reviving #43."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "dupe.py"
+    app.write_text(
+        "import streamlit as st\n"
+        "st.selectbox('X', ['a', 'b'], key='sel')\n"
+        "st.text_input('X', key='txt')\n"
+    )
+    assert main(["call", str(app), "--set", "X=true", "--state", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["txt"] == "true"  # literal, not "True"
