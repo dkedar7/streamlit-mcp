@@ -75,6 +75,22 @@ tabs and containers.
     the real type (`1`) — that's what Streamlit's own testing API exposes. Both forms are accepted:
     `set_widget("Pick", 2)` and `set_widget("Pick", "2")` both select the real option `2`.
 
+!!! note "Placeholder (no-selection) widgets"
+    A `selectbox`/`radio` built with `index=None` (the "please select…" placeholder) starts with no
+    selection: its value is `null`, its schema is nullable (`{"type": ["string","null"], "enum":
+    [...options, null]}`), and `set_widget(id, null)` (CLI `--set "Choose=null"`) **clears the
+    selection** back to the placeholder — so the value round-trips and a "reset this filter" flow
+    works. A regular `selectbox`/`radio` (with a default selection) has no no-selection state and
+    rejects `null`.
+
+!!! note "App exceptions"
+    If the served app raises an uncaught exception, it's captured in the `exception` field and
+    surfaced on every read surface — `--json`, MCP `read_output`/`get_layout`, **and** the text CLI
+    (`call`/`inspect` print an `exception:` line). By default this is a reported field, not a
+    failure (exit `0`, mirroring MCP's `isError=False`); pass `--strict` to `call`/`inspect` to
+    **exit non-zero** when the app raised, for CI and scripts. (A guardrail or load error is a real
+    failure and exits non-zero regardless.)
+
 ## Custom semantic tools
 
 Beyond the per-widget tools, expose a higher-level named action by decorating a function with

@@ -131,6 +131,17 @@ def _resolve_value(w: Optional[dict], raw: str) -> Any:
     return _parse_value(raw)
 
 
+def _report_exception(exception: Optional[str], args: argparse.Namespace) -> int:
+    """Render the served app's uncaught exception on the text CLI (so a human sees what the agent
+    already gets over MCP and what --json carries — #58), and return the exit code. By default an
+    app-level exception is a reported field, not a failure: over MCP it comes back with
+    ``isError=False``, so the CLI mirrors that with exit 0 unless ``--strict`` is set. Printing is
+    skipped for --json, whose payload already carries the field."""
+    if exception and not getattr(args, "json", False):
+        print(f"  exception: {exception}")
+    return 1 if getattr(args, "strict", False) and exception else 0
+
+
 # --------------------------------------------------------------------- commands
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import serve
@@ -155,13 +166,18 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     except Exception as e:  # mirror cmd_call: a bad/missing app file -> clean message, exit 1
         print(str(e), file=sys.stderr)
         return 1
+    # The served app's uncaught exception, if any. get_layout carries it; list_widgets doesn't, so
+    # read it separately for a bare `inspect` — the text CLI used to drop it entirely (#58).
+    exception = out.get("exception")
+    if exception is None and not args.layout:
+        exception = eng.read_output().get("exception")
     # Human<->agent parity: surface @mcp_tool semantic tools the agent sees over MCP.
     tools = [{"name": s.name, "description": s.description} for s in registered_semantic_tools()]
     if tools:
         out["tools"] = tools
     if args.json:
         print(json.dumps(out, indent=2, default=str))
-        return 0
+        return _report_exception(exception, args)
     for w in out["widgets"]:
         flag = " [action]" if w.get("action") else ""
         print(f"  {w['kind']:<13} {w['identifier']:<14} = {w['value']!r}{flag}")
@@ -182,7 +198,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         print("  tools:")
         for t in tools:
             print(f"    {t['name']:<14} {t['description']}")
-    return 0
+    return _report_exception(exception, args)
 
 
 def cmd_call(args: argparse.Namespace) -> int:
@@ -217,19 +233,24 @@ def cmd_call(args: argparse.Namespace) -> int:
         for ident in args.click or []:
             eng.click(ident)
         result = eng.get_state() if args.state else eng.read_output()
+        # The structured app-level exception (present when the *served app* raised, as opposed to a
+        # guardrail/load error). The agent sees it over MCP via read_output/get_layout, and --json
+        # carries it, but the text CLI used to drop it — so a crashed app rendered as a clean
+        # partial success at exit 0 (#58). get_state() doesn't carry it (parity with MCP get_state),
+        # so read it from read_output when we're in --state mode.
+        exception = (result if not args.state else eng.read_output()).get("exception")
     except Exception as e:  # CLI: surface any failure as a clean message + exit 1
         print(str(e), file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(result, indent=2, default=str))
-        return 0
-    if args.state:
+    elif args.state:
         for k, v in result.items():
             print(f"  {k} = {v!r}")
     else:
         for o in result.get("outputs", []):
             print(f"  [{o['kind']}] {o['text']}")
-    return 0
+    return _report_exception(exception, args)
 
 
 # --------------------------------------------------------------------- parser
@@ -264,6 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("app")
     p_inspect.add_argument("--layout", action="store_true", help="full layout (outputs, state, unsupported)")
     p_inspect.add_argument("--json", action="store_true")
+    p_inspect.add_argument("--strict", action="store_true",
+                           help="exit non-zero if the served app raised an uncaught exception")
     _add_guard_flags(p_inspect, bearer=False)
     p_inspect.set_defaults(func=cmd_inspect)
 
@@ -277,6 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_call.add_argument("--read", action="store_true", help="print rendered output (default)")
     p_call.add_argument("--state", action="store_true", help="print session_state instead")
     p_call.add_argument("--json", action="store_true")
+    p_call.add_argument("--strict", action="store_true",
+                        help="exit non-zero if the served app raised an uncaught exception")
     _add_guard_flags(p_call, bearer=False)
     p_call.set_defaults(func=cmd_call)
 
