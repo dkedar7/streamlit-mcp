@@ -117,7 +117,9 @@ It's reachable from the CLI too (human ↔ agent parity): `streamlit-mcp inspect
 
 Everything an agent can do over MCP, a human can do via the CLI — both call the same
 engine. The read-only mode and widget allow-list guardrails apply identically to both
-surfaces.
+surfaces. If the served app raises, the exception is reported on every surface — `--json`,
+MCP `read_output`/`get_layout`, and the text CLI — and `call`/`inspect --strict` exit
+non-zero on an app exception (for CI/scripts).
 
 ## Security / trust model
 

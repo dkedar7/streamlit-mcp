@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 (2026-07-15)
+
+Two more fixes from the nightly dogfood routine — both restoring fidelity between what a surface
+reports and what it accepts, the same through-line as 0.4.0.
+
+- **Fix:** a **placeholder** `selectbox`/`radio` (built with `index=None` — the ubiquitous
+  "please select…" pattern) now round-trips its no-selection value (#57). Its value is reported as
+  `null`, but that `null` (a) violated the widget's own advertised `schema` — `list_widgets`/
+  `inspect --json` emitted `enum: [...options]` with no `null`, while reporting `value: null` — and
+  (b) was **rejected on write-back**: `set_widget("choose", null)` failed with "None is not a valid
+  option", even though `null` is exactly the value the tool just reported. So the round-trip was
+  broken for the whole placeholder class: an agent read `value: null` and couldn't send it back.
+  Two coordinated changes: the schema is now **nullable when the value is null**
+  (`{"type": ["string","null"], "enum": [...options, null]}`), so the reported value satisfies its
+  own schema; and `set_widget(id, null)` **clears the selection** back to the placeholder (a real
+  "reset this filter" operation AppTest supports). A *regular* (`index=0`) selectbox/radio, which
+  genuinely has no no-selection state, still rejects `null` — with the prior value rolled back, so
+  the set stays atomic. (That path can't be pre-validated: AppTest exposes no "is nullable" flag
+  and silently keeps or default-resets a non-nullable widget set to `null`, so it's caught by
+  setting `null` and verifying the selection actually cleared — sound because `null` is never a
+  value-corrupting write to attempt.)
+
+- **Fix:** the human text CLI now **surfaces a served app's uncaught exception**, matching `--json`
+  and MCP (#58). When an app raises, the exception is captured in the structured `exception` field
+  and reported on `--json` (`call`/`inspect`) and over MCP (`read_output`/`get_layout`) — but the
+  default text CLI dropped it, printing only the partial render with **`exit 0`** and no error line,
+  so a crashed app looked like a clean, successful run (and only Streamlit's raw stderr traceback
+  hinted otherwise — the very dump #27 keeps off the protocol channel). This broke the headline
+  human↔agent parity guarantee on the error surface. `call --read`, `call --state`, and
+  `inspect --layout`/bare `inspect` now print an `exception:` line matching what `--json`/MCP carry.
+
+- **New:** a **`--strict` flag** on `call` and `inspect` makes them **exit non-zero** when the
+  served app raised an uncaught exception, so a crashed app is detectable in CI/scripts without
+  parsing `--json` for a non-null `exception` (`streamlit-mcp call app.py --read --strict || …`).
+  Default behavior is unchanged: an app-level exception is a *reported field*, not a failure — over
+  MCP it returns with `isError=False`, and the CLI mirrors that with `exit 0` unless `--strict` is
+  set. (A guardrail/load error is a real failure and still exits non-zero regardless.)
+
+**Behavior changes** (why this is a minor bump): a placeholder `selectbox`/`radio` advertises a
+nullable schema (`["string","null"]`) instead of the bare `string` enum, and `set_widget(id, null)`
+on such a widget now succeeds where it used to error; the text CLI prints an `exception:` line for a
+crashed app where it previously printed nothing. No previously-working set stops working, and the
+default exit codes are unchanged.
+
 ## 0.4.0 (2026-07-13)
 
 Five fixes from the nightly dogfood routine, all of the same family: the widget model lost

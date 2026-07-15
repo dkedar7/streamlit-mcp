@@ -223,6 +223,11 @@ class AppTestRuntime:
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
         coerced = self._coerce(kind, value)
+        # Clearing a selectbox/radio to no-selection (null) is the placeholder pattern's own state,
+        # not an option — it takes a separate attempt-and-verify path (#57), see _clear_selection.
+        if coerced is None and kind in ("selectbox", "radio"):
+            self._clear_selection(identifier, kind, el)
+            return
         # Reject a bad value BEFORE writing it. An invalid *option* raises inside at.run()
         # and the pending bad value poisons every later call (#10); an out-of-range *number/
         # slider/date* does the opposite — AppTest silently resets it to the widget default
@@ -247,6 +252,41 @@ class AppTestRuntime:
             raise RuntimeError_(
                 f"setting {identifier!r} to {value!r} failed and was rolled back: {e}"
             ) from e
+
+    def _clear_selection(self, identifier: str, kind: str, el) -> None:
+        """Set a selectbox/radio to no-selection (null) — the state of a widget built with
+        ``index=None`` (the ubiquitous 'please select…' placeholder). Its value is reported as
+        null, so an agent must be able to send null straight back (#57); a real option is rejected
+        by _validate_choice, but null is that widget's own valid state, not an option.
+
+        Only an ``index=None`` widget supports it. A regular (``index=0``) selectbox/radio does NOT
+        clear when set to None — AppTest silently keeps the value or resets it to the widget default
+        (whichever, it diverges from the requested null without raising), and exposes no up-front
+        'nullable' flag to tell the two apart — even a placeholder that currently holds a selection
+        looks identical to a regular one. So this is the one write that can't be pre-validated; it's
+        caught by VERIFYING the selection actually cleared. That's sound here because null is never
+        a value-corrupting write to attempt: if it doesn't take, we roll the prior value back and
+        reject, so the set stays atomic and a non-clear is never reported as success — the same
+        guarantee the up-front checks (#12/#31/#55) give the writes that WOULD poison or corrupt."""
+        prior = getattr(el, "value", None)
+        self._set(kind, el, None)
+        try:
+            self._run_script()
+        except Exception as e:
+            self._rollback(identifier, prior)
+            raise RuntimeError_(
+                f"clearing {identifier!r} to no-selection failed and was rolled back: {e}"
+            ) from e
+        _, after = self._find(identifier)
+        if getattr(after, "value", None) is not None:
+            # Not nullable: the widget didn't clear (it kept its value, or reset to the default).
+            # Restore the prior value so the failed set leaves state untouched, then reject.
+            self._rollback(identifier, prior)
+            options = list(getattr(el, "options", []) or [])
+            raise RuntimeError_(
+                f"{kind} {identifier!r} cannot be set to null (no selection); it was not created "
+                f"with index=None. Choose one of {options}"
+            )
 
     def click(self, identifier: str) -> None:
         kind, el = self._find(identifier)

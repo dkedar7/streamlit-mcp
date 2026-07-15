@@ -897,3 +897,182 @@ def test_cli_parses_the_value_against_the_widget_it_actually_writes(tmp_path, ca
     )
     assert main(["call", str(app), "--set", "X=true", "--state", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["txt"] == "true"  # literal, not "True"
+
+
+# --- 0.5.0 #57: an index=None placeholder selectbox/radio round-trips its null value ---
+PLACEHOLDER_APP = (
+    "import streamlit as st\n"
+    "st.selectbox('Choose', ['a', 'b', 'c'], index=None, key='choose')\n"
+    "st.radio('Rad', ['x', 'y'], index=None, key='rad')\n"
+    "st.selectbox('Reg', ['a', 'b', 'c'], key='reg')\n"  # regular: index=0, not nullable
+)
+
+
+def test_placeholder_schema_permits_null():
+    """A placeholder selectbox/radio reports value: null, so its own enum must permit null — else
+    the read output contradicts the schema it advertises and a schema-validating agent balks at a
+    value the tool itself emitted (#57)."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    schemas = {w["identifier"]: w for w in Engine(rt).list_widgets()["widgets"]}
+    for ident in ("choose", "rad"):
+        w = schemas[ident]
+        assert w["value"] is None
+        v = w["schema"]["properties"]["value"]
+        assert v["type"] == ["string", "null"]
+        assert None in v["enum"]  # the value the widget reports is in its own enum
+    # a regular (index=0) selectbox is unchanged — never null, so never nullable
+    reg = schemas["reg"]["schema"]["properties"]["value"]
+    assert reg["type"] == "string" and None not in reg["enum"]
+
+
+@pytest.mark.parametrize("identifier", ["choose", "rad"])
+def test_placeholder_null_round_trips(identifier):
+    """The core defect: an agent reads value: null and cannot send it back. set_widget(id, null)
+    must be accepted (it's the widget's own reported value)."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    rt.set_widget(identifier, None)  # must not raise
+    assert rt.snapshot().session_state[identifier] is None
+
+
+def test_placeholder_can_be_cleared_after_a_selection():
+    """The 'reset this filter' workflow: select a real option, then clear back to no-selection."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    rt.set_widget("choose", "b")
+    assert rt.snapshot().session_state["choose"] == "b"
+    rt.set_widget("choose", None)
+    assert rt.snapshot().session_state["choose"] is None
+
+
+def test_regular_selectbox_rejects_null_not_silently():
+    """A regular (index=0) selectbox does NOT support no-selection: AppTest silently keeps its
+    value when set to None. That must be rejected, not reported as a success — the same
+    silent-revert principle as #12/#31/#55, verified here by attempt-and-check since None can't be
+    told apart from a valid clear up front."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    rt.set_widget("reg", "b")  # give it a real selection first
+    with pytest.raises(RuntimeError_, match="cannot be set to null"):
+        rt.set_widget("reg", None)
+    assert rt.snapshot().session_state["reg"] == "b"  # untouched — the no-op didn't corrupt it
+
+
+def test_placeholder_real_options_still_work():
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    rt.set_widget("choose", "c")
+    rt.set_widget("rad", "y")
+    state = rt.snapshot().session_state
+    assert state["choose"] == "c" and state["rad"] == "y"
+
+
+def test_placeholder_null_round_trips_via_cli(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "ph.py"
+    app.write_text(PLACEHOLDER_APP)
+    assert main(["call", str(app), "--set", "Choose=null", "--state", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["choose"] is None
+
+
+def test_every_placeholder_value_is_settable_back_verbatim():
+    """The round-trip guarantee, stated directly, now including the null value."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=PLACEHOLDER_APP)
+    rt.run()
+    eng = Engine(rt)
+    for w in eng.list_widgets()["widgets"]:
+        eng.set_widget(w["identifier"], w["value"])  # value: null included — must not raise
+
+
+# --- 0.5.0 #58: the text CLI surfaces the app's exception, matching --json/MCP ---
+BOOM_APP = (
+    "import streamlit as st\n"
+    "st.title('Dashboard')\n"
+    "st.text_input('Name', key='name')\n"
+    "raise ValueError('kaboom: config missing')\n"
+)
+
+
+@pytest.mark.parametrize("argv", [
+    ["call", "--read"],
+    ["call", "--state"],
+    ["inspect", "--layout"],
+    ["inspect"],  # bare inspect surfaces it too
+])
+def test_text_cli_surfaces_the_app_exception(tmp_path, capsys, argv):
+    """A crashed app used to render as a clean partial success on the text CLI: the structured
+    exception the agent gets over MCP (and --json carries) was dropped from every text surface,
+    breaking human<->agent parity on the error surface (#58)."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "boom.py"
+    app.write_text(BOOM_APP)
+    rc = main([argv[0], str(app), *argv[1:]])
+    out = capsys.readouterr().out
+    assert "kaboom: config missing" in out  # the exception is on stdout now
+    assert rc == 0  # default: an app-level exception mirrors MCP's isError=False (not a failure)
+
+
+@pytest.mark.parametrize("argv", [
+    ["call", "--read", "--strict"],
+    ["call", "--state", "--strict"],
+    ["inspect", "--layout", "--strict"],
+    ["inspect", "--strict"],
+    ["call", "--read", "--json", "--strict"],  # --strict is orthogonal to output format
+])
+def test_strict_exits_nonzero_when_the_app_raised(tmp_path, argv):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "boom.py"
+    app.write_text(BOOM_APP)
+    assert main([argv[0], str(app), *argv[1:]]) == 1
+
+
+def test_strict_is_a_no_op_on_a_clean_app(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "ok.py"
+    app.write_text("import streamlit as st\nst.title('fine')\n")
+    assert main(["call", str(app), "--read", "--strict"]) == 0
+    assert "exception" not in capsys.readouterr().out
+
+
+def test_json_output_still_carries_the_exception_without_a_duplicate_line(tmp_path, capsys):
+    """--json already had the field; it must stay in the payload and NOT also print a text line
+    that would corrupt the JSON."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "boom.py"
+    app.write_text(BOOM_APP)
+    assert main(["call", str(app), "--read", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert json.loads(out)["exception"] == "kaboom: config missing"  # parses cleanly
+
+
+def test_cli_exception_matches_mcp(tmp_path, capsys):
+    """Parity, stated directly: the string the text CLI prints is the one MCP read_output returns."""
+    from streamlit_mcp.cli import main
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    app = tmp_path / "boom.py"
+    app.write_text(BOOM_APP)
+    assert main(["call", str(app), "--read"]) == 0
+    cli_out = capsys.readouterr().out
+    rt = AppTestRuntime(str(app))
+    rt.run()
+    mcp_exception = Engine(rt).read_output()["exception"]
+    assert mcp_exception in cli_out
+
+
+def test_guardrail_denial_still_exits_one_regardless_of_strict(tmp_path, capsys):
+    """A guardrail denial is a real failure (exit 1) independent of --strict — only an app-level
+    exception is the exit-0-by-default case."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "ok.py"
+    app.write_text("import streamlit as st\nst.text_input('Name', key='name')\n")
+    assert main(["call", str(app), "--read-only", "--set", "Name=x"]) == 1
