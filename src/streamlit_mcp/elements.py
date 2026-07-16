@@ -110,6 +110,24 @@ def is_range_widget(model: dict) -> bool:
     return model["kind"] in RANGE_KINDS and isinstance(model.get("value"), list)
 
 
+def _make_nullable(value_schema: dict) -> dict:
+    """Widen a value-schema to also permit null. A widget built with ``value=None`` / ``index=None``
+    (a text/number/date/time placeholder, or a 'please select…' selectbox/radio) reports
+    ``value: null``, so its own schema must allow null — else the reported value contradicts the
+    schema it advertises and a schema-validating agent balks at a value the tool itself emitted.
+    Applied uniformly by value (not per-kind) so the fix can't re-open for the next placeholder-
+    capable widget (#57 fixed only selectbox/radio; #60 hit text_input/text_area/number_input)."""
+    s = dict(value_schema)
+    t = s.get("type")
+    if isinstance(t, str):
+        s["type"] = [t, "null"]
+    elif isinstance(t, list) and "null" not in t:
+        s["type"] = [*t, "null"]
+    if "enum" in s and None not in s["enum"]:
+        s["enum"] = [*s["enum"], None]
+    return s
+
+
 def tool_schema_for(model: dict) -> dict:
     """A JSON-schema-ish input schema for setting/invoking this widget."""
     kind = model["kind"]
@@ -124,12 +142,6 @@ def tool_schema_for(model: dict) -> dict:
             value["maximum"] = c["max"]
     elif kind in ("selectbox", "radio", "select_slider"):
         value = {"type": "string", "enum": list(c.get("options", []))}
-        # A placeholder selectbox/radio (built with index=None) has no selection: its value is
-        # null, so its own schema must permit null — otherwise the reported value contradicts the
-        # enum it advertises and a schema-validating agent balks at a value the tool itself emitted
-        # (#57). select_slider always has both handles, so it is never null.
-        if model.get("value") is None and kind in ("selectbox", "radio"):
-            value = {"type": ["string", "null"], "enum": value["enum"] + [None]}
     elif kind == "multiselect":
         value = {"type": "array", "items": {"type": "string", "enum": c.get("options", [])}}
     elif kind in ("checkbox", "toggle"):
@@ -150,6 +162,8 @@ def tool_schema_for(model: dict) -> dict:
         # a one-element range) while set_widget reported success (#55). Advertise what the widget
         # actually holds: both handles, so a valid set can be constructed from what's advertised.
         value = {"type": "array", "items": value, "minItems": 2, "maxItems": 2}
+    elif model.get("value") is None:
+        value = _make_nullable(value)  # a value=None / index=None placeholder — see _make_nullable
     return {
         "type": "object",
         "properties": {"value": value},

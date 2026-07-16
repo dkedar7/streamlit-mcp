@@ -1076,3 +1076,103 @@ def test_guardrail_denial_still_exits_one_regardless_of_strict(tmp_path, capsys)
     app = tmp_path / "ok.py"
     app.write_text("import streamlit as st\nst.text_input('Name', key='name')\n")
     assert main(["call", str(app), "--read-only", "--set", "Name=x"]) == 1
+
+
+# --- 0.5.1 #60: value=None placeholders (text/number/date/time) round-trip null, uniformly ---
+# The null-placeholder class is now handled by ONE shared path (schema: _make_nullable by value;
+# write: _clear_to_none for any kind), so it can't re-open widget-by-widget the way #57 (fixed only
+# selectbox/radio) left it open for text_input/text_area/number_input.
+NULLABLE_APP = (
+    "import streamlit as st\n"
+    "st.text_input('Name', value=None, key='name')\n"
+    "st.text_area('Bio', value=None, key='bio')\n"
+    "st.number_input('Qty', value=None, key='qty')\n"
+    "st.date_input('When', value=None, key='when')\n"
+    "st.time_input('At', value=None, key='at')\n"
+    "st.selectbox('Pick', ['a', 'b'], index=None, key='pick')\n"  # the #57 case, same path
+)
+
+
+def test_value_none_placeholders_advertise_a_nullable_schema():
+    """Bug B: a widget reporting value: null must advertise a schema that permits null, or the
+    read output contradicts its own schema. #57 fixed this for selectbox/radio; it stayed broken
+    for text_input/text_area/number_input (and, latently, date/time) — now fixed uniformly (#60)."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    for w in Engine(rt).list_widgets()["widgets"]:
+        assert w["value"] is None, w["identifier"]
+        t = w["schema"]["properties"]["value"]["type"]
+        assert "null" in t, (w["identifier"], t)  # every null-valued widget's schema allows null
+
+
+@pytest.mark.parametrize("identifier", ["name", "bio", "qty", "when", "at", "pick"])
+def test_value_none_placeholder_round_trips_null(identifier):
+    """Bug A + the round-trip: echoing the reported value: null back must store null, not corrupt
+    it. text_input/text_area used to store the string 'None' (str(None)) at isError=False."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    rt.set_widget(identifier, None)  # must not raise
+    assert rt.snapshot().session_state[identifier] is None  # null, not the string "None"
+
+
+def test_text_placeholder_null_is_not_stringified():
+    """The specific #60 corruption, pinned: None on a text field must stay None, never become the
+    literal string 'None' (the str(value) coercion added for #43 wrongly caught None)."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    rt.set_widget("name", None)
+    stored = rt.snapshot().session_state["name"]
+    assert stored is None and stored != "None"
+
+
+def test_text_field_still_stringifies_non_none_json_values():
+    """The #43 behavior must survive: a JSON-typed non-None value on a text field still becomes its
+    string (True -> 'True', 41 -> '41') — only None is exempted."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script="import streamlit as st\nst.text_input('C', key='c')\n")
+    rt.run()
+    rt.set_widget("c", True)
+    assert rt.snapshot().session_state["c"] == "True"
+
+
+@pytest.mark.parametrize("script,identifier,prior", [
+    ("import streamlit as st\nst.text_input('R', key='r')\n", "r", ""),        # regular text (value="")
+    ("import streamlit as st\nst.number_input('N', value=5, key='n')\n", "n", 5),  # regular number
+    ("import streamlit as st\nst.selectbox('S', ['a', 'b'], key='s')\n", "s", "a"),  # regular selectbox
+])
+def test_non_nullable_widget_rejects_null_atomically(script, identifier, prior):
+    """A widget that is NOT a placeholder has no no-value state: AppTest silently keeps its value
+    when set to null. That must be rejected (not reported as a success), with the prior value
+    intact — the same silent-revert guarantee as #12/#31/#55, verified by attempt-and-check since
+    null can't be told apart from a valid clear up front."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="cannot be set to null"):
+        rt.set_widget(identifier, None)
+    assert rt.snapshot().session_state[identifier] == prior  # untouched
+
+
+def test_every_advertised_value_round_trips_including_nulls():
+    """The round-trip guarantee stated directly, now spanning the whole null-placeholder class:
+    every value list_widgets advertises (null included) can be sent straight back."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    eng = Engine(rt)
+    for w in eng.list_widgets()["widgets"]:
+        eng.set_widget(w["identifier"], w["value"])  # value: null included — must not raise
+
+
+def test_number_input_none_schema_keeps_its_bounds():
+    """Making the type nullable must not drop the min/max the schema already carried."""
+    from streamlit_mcp.elements import tool_schema_for
+    schema = tool_schema_for({"kind": "number_input", "value": None,
+                              "constraints": {"min": 0, "max": 10}})["properties"]["value"]
+    assert schema["type"] == ["number", "null"]
+    assert schema["minimum"] == 0 and schema["maximum"] == 10

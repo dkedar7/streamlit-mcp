@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.1 (2026-07-16)
+
+Completes the null-placeholder fix from 0.5.0 (#57), which covered only `selectbox`/`radio` and
+left the other widgets that legitimately hold `value: None` broken the same way (#60). The whole
+class is now handled by **one shared path** — schema nullability keyed on the value, and a single
+kind-agnostic write path — so it can't re-open widget-by-widget.
+
+- **Fix:** a `text_input`/`text_area` built with `value=None` (the "empty field" placeholder) no
+  longer **corrupts its value on write-back**. Echoing its reported `value: null` back over MCP —
+  `set_widget("name", null)` — stored the literal string `"None"` and returned `isError=False`:
+  the value an agent just read couldn't be sent back, state was silently mutated to a wrong value,
+  and the failed round-trip was reported as success. The `str(value)` coercion added for #43 (so a
+  JSON-typed value on a text field becomes its string — `True` → `"True"`) wrongly caught `None`,
+  the field's own no-value sentinel. `None` now passes through and round-trips as `null`. (Non-None
+  values still stringify, as #43 intends.)
+
+- **Fix:** the `None`-placeholder **schema is now nullable for every widget that reports
+  `value: null`**, not just `selectbox`/`radio`. A `text_input`/`text_area`/`number_input` (and
+  `date_input`/`time_input`) built with `value=None` advertised `value: null` against a
+  non-nullable schema (`{"type": "string"}` / `{"type": "number"}`), so a schema-validating agent
+  balked at a value the tool itself emitted — the (b)-half of #57, left unfixed for non-option
+  widgets. `tool_schema_for` now widens the schema to allow null whenever the reported value is
+  null, uniformly (`{"type": ["string","null"]}`, `{"type": ["number","null"], …}`), so the
+  reported value always satisfies its own schema.
+
+- Under the hood, `set_widget(id, null)` is now one **kind-agnostic** operation ("return the widget
+  to its no-value/no-selection state"): a `value=None`/`index=None` placeholder of any kind accepts
+  null and round-trips it; a regular widget (a `selectbox` with a default, a plain `text_input`, a
+  `number_input` with a value) has no no-value state and **rejects null atomically** — with its
+  prior value intact — instead of silently keeping it (text previously stored `"None"`; a regular
+  `number_input`/`selectbox` silently no-op'd or reset to default). One documented rule per the
+  issue's suggestion, so the next placeholder-capable widget is covered for free.
+
+**Behavior changes:** a `value=None` `text_input`/`text_area`/`number_input`/`date_input`/
+`time_input` now advertises a nullable schema (`["…","null"]`) instead of the bare type, and
+`set_widget(id, null)` on such a widget round-trips (text no longer stores `"None"`); a regular
+widget of those kinds now rejects `null` where text used to store `"None"` and number silently
+ignored it. No previously-correct set stops working.
+
 ## 0.5.0 (2026-07-15)
 
 Two more fixes from the nightly dogfood routine — both restoring fidelity between what a surface
