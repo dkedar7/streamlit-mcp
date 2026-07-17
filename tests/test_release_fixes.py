@@ -583,7 +583,7 @@ TYPED_OPTIONS_APP = (
     "import streamlit as st\n"
     "st.selectbox('Pick', [1, 2, 3], key='pick')\n"
     "st.radio('Rate', [10, 20, 30], key='rate')\n"
-    "st.multiselect('Nums', [1, 2, 3], key='nums')\n"
+    "st.multiselect('Nums', [1, 2, 3], default=[2], key='nums')\n"
     "st.select_slider('Size', options=[10, 20, 30], key='size')\n"
 )
 
@@ -631,6 +631,26 @@ def test_every_advertised_value_is_settable_back_verbatim():
     eng = Engine(rt)
     for w in eng.list_widgets()["widgets"]:
         eng.set_widget(w["identifier"], w["value"])  # must not raise
+
+
+def test_non_string_option_values_satisfy_their_advertised_schema():
+    """Typed choice values must belong to the enum advertised alongside them."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+
+    widgets = {w["identifier"]: w for w in Engine(rt).list_widgets()["widgets"]}
+    for identifier in ("pick", "rate", "size"):
+        widget = widgets[identifier]
+        value_schema = widget["schema"]["properties"]["value"]
+        assert widget["value"] in value_schema["enum"]
+        assert "type" not in value_schema
+
+    multiselect = widgets["nums"]
+    item_schema = multiselect["schema"]["properties"]["value"]["items"]
+    assert all(value in item_schema["enum"] for value in multiselect["value"])
+    assert "type" not in item_schema
 
 
 def test_int_number_input_rejects_a_fractional_value():

@@ -110,6 +110,15 @@ def is_range_widget(model: dict) -> bool:
     return model["kind"] in RANGE_KINDS and isinstance(model.get("value"), list)
 
 
+def _choice_schema(model: dict, options: list) -> dict:
+    current = model.get("value")
+    current_values = current if isinstance(current, list) else [current]
+    typed_values = [v for v in current_values if v is not None and not isinstance(v, str)]
+    if not typed_values:
+        return {"type": "string", "enum": options}
+    return {"enum": typed_values + options}
+
+
 def tool_schema_for(model: dict) -> dict:
     """A JSON-schema-ish input schema for setting/invoking this widget."""
     kind = model["kind"]
@@ -123,7 +132,7 @@ def tool_schema_for(model: dict) -> dict:
         if "max" in c:
             value["maximum"] = c["max"]
     elif kind in ("selectbox", "radio", "select_slider"):
-        value = {"type": "string", "enum": list(c.get("options", []))}
+        value = _choice_schema(model, list(c.get("options", [])))
         # A placeholder selectbox/radio (built with index=None) has no selection: its value is
         # null, so its own schema must permit null — otherwise the reported value contradicts the
         # enum it advertises and a schema-validating agent balks at a value the tool itself emitted
@@ -131,7 +140,7 @@ def tool_schema_for(model: dict) -> dict:
         if model.get("value") is None and kind in ("selectbox", "radio"):
             value = {"type": ["string", "null"], "enum": value["enum"] + [None]}
     elif kind == "multiselect":
-        value = {"type": "array", "items": {"type": "string", "enum": c.get("options", [])}}
+        value = {"type": "array", "items": _choice_schema(model, list(c.get("options", [])))}
     elif kind in ("checkbox", "toggle"):
         value = {"type": "boolean"}
     elif kind == "date_input":
