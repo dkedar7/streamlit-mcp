@@ -31,7 +31,7 @@ def _stdout_to_stderr():
     finally:
         sys.stdout = saved
 
-# The ten widget kinds supported in v1 (origin R10). Order is display order.
+# The widget kinds we drive (origin R10). Order is display order.
 SUPPORTED_KINDS = (
     "text_input",
     "number_input",
@@ -47,7 +47,22 @@ SUPPORTED_KINDS = (
     "date_input",
     "time_input",
     "color_picker",
+    "pills",
+    "segmented_control",
+    "feedback",
 )
+
+# st.pills and st.segmented_control are the SAME element in the tree — both arrive typed
+# `button_group`, which is why they were once written off as undetectable — but AppTest exposes
+# them under separate typed accessors. Resolving the real kind from those accessors is what lets
+# them be supported under the names an agent actually writes in the app, rather than a shared
+# protobuf name that matches neither.
+BUTTON_GROUP_KINDS = ("pills", "segmented_control")
+
+# st.feedback's option count is fixed by its style and is not exposed on the AppTest element, so it
+# comes off the widget proto's enum — keyed by NAME rather than number, so a renumbering upstream
+# can't silently turn thumbs into a 5-point scale.
+_FEEDBACK_OPTION_COUNTS = {"THUMBS": 2, "FACES": 5, "STARS": 5}
 
 # Output element kinds we render to agent-readable text.
 #
@@ -186,13 +201,51 @@ class AppTestRuntime:
         resolve) both consume it, so an advertised identifier is exactly the one _find accepts,
         including the ``kind[index]`` fallback (#41). ``index`` is a per-kind counter in this order."""
         supported = set(SUPPORTED_KINDS)
+        overrides = self._button_group_kinds()
         kind_index: dict[str, int] = {}
         for el in self._walk():
             kind = getattr(el, "type", None)
+            if kind == "button_group":
+                # Shared protobuf name for pills and segmented_control — resolve which one it is.
+                # An unrecognized button_group (a future widget on the same proto) maps to None and
+                # falls through as unsupported, rather than being driven under the wrong kind.
+                kind = overrides.get(self._widget_id(el))
             if kind in supported:
                 idx = kind_index.get(kind, 0)
                 kind_index[kind] = idx + 1
                 yield kind, idx, el
+
+    @staticmethod
+    def _widget_id(el) -> Optional[str]:
+        """The widget's own protobuf id — stable across accessor reads, unlike Python identity."""
+        return getattr(getattr(el, "proto", None), "id", None)
+
+    def _button_group_kinds(self) -> dict:
+        """widget id -> real kind, for the elements whose ``.type`` is the shared `button_group`."""
+        mapping: dict = {}
+        for kind in BUTTON_GROUP_KINDS:
+            for el in getattr(self.at, kind, []) or []:
+                wid = self._widget_id(el)
+                if wid is not None:
+                    mapping[wid] = kind
+        return mapping
+
+    @classmethod
+    def _feedback_max(cls, el) -> Optional[int]:
+        """Highest valid index for an st.feedback widget (thumbs -> 1, faces/stars -> 4).
+
+        An unrecognized style yields None, so no bound is advertised or enforced rather than a
+        wrong one — better to let a value through than to reject a valid rating."""
+        proto = getattr(el, "proto", None)
+        if proto is None:
+            return None
+        try:
+            field = proto.DESCRIPTOR.fields_by_name["type"]
+            name = field.enum_type.values_by_number[getattr(proto, "type", 0)].name
+        except Exception:
+            return None
+        count = _FEEDBACK_OPTION_COUNTS.get(name)
+        return count - 1 if count else None
 
     def snapshot(self) -> RuntimeSnapshot:
         self._ensure()
@@ -205,8 +258,10 @@ class AppTestRuntime:
                 label=getattr(el, "label", None),
                 value=getattr(el, "value", None),
                 options=list(getattr(el, "options", []) or []) or None,
-                min=getattr(el, "min", None),
-                max=getattr(el, "max", None),
+                # A feedback widget carries no min/max of its own; its bounds are the option count
+                # implied by its style, so they're derived and advertised like any other range.
+                min=0 if kind == "feedback" else getattr(el, "min", None),
+                max=self._feedback_max(el) if kind == "feedback" else getattr(el, "max", None),
                 step=getattr(el, "step", None),
             )
             for kind, idx, el in self._iter_widgets()
@@ -310,7 +365,7 @@ class AppTestRuntime:
         kind, el = self._find(identifier)
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
-        coerced = self._coerce(kind, value)
+        coerced = self._coerce(kind, value, el)
         # Setting a widget to null means "return it to its no-value/no-selection state" — the state
         # a value=None / index=None placeholder is born in and reports as its value. It's not an
         # option/number/date to validate, so it takes one shared attempt-and-verify path across
@@ -330,6 +385,7 @@ class AppTestRuntime:
         self._validate_range(kind, el, coerced)
         self._validate_color(kind, coerced)
         self._validate_number(kind, identifier, el, coerced)
+        self._validate_feedback(kind, identifier, el, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
@@ -374,6 +430,16 @@ class AppTestRuntime:
             self._rollback(identifier, prior)
             options = list(getattr(el, "options", []) or [])
             hint = f" Choose one of {options}." if options else ""
+            if kind in BUTTON_GROUP_KINDS:
+                # Not the placeholder story the generic message tells: a pills/segmented_control
+                # legitimately starts with no selection, so it may well have been created without a
+                # default — AppTest simply offers no way back, since set_value(None) is a silent
+                # no-op on it. Say what's actually true, and point at the route that does work.
+                clear = " A multi-select is cleared with []." if isinstance(prior, list) else ""
+                raise RuntimeError_(
+                    f"{kind} {identifier!r} cannot be set to null: AppTest offers no way to "
+                    f"deselect it once a selection is made.{hint}{clear}"
+                )
             raise RuntimeError_(
                 f"{kind} {identifier!r} cannot be set to null: it has no no-value state (it was not "
                 f"created with value=None / index=None).{hint}"
@@ -399,6 +465,21 @@ class AppTestRuntime:
         silently vanishes (or half-lands) while set_widget reports success (#55). That is the arity
         sibling of the value-mismatch silent reverts closed in #12/#31/#33, and it has to be caught
         the same way: up front. Checked in both directions, since both revert silently."""
+        if kind in BUTTON_GROUP_KINDS:
+            # A pills/segmented_control is single- or multi-select, and its VALUE SHAPE is the
+            # signal (the same signal a range widget gives): multi holds a list — [] when nothing
+            # is chosen — where single holds a bare option or None. AppTest normalizes a mismatch
+            # away silently, exactly like the range case: a list sent to a single-select reverts
+            # with no exception, so set_widget would report success on a write that never landed.
+            # (The mirror direction, a bare option sent to a multi-select, is a legitimate "select
+            # just this one" and is wrapped in _coerce instead — the multiselect convention.)
+            if not isinstance(getattr(el, "value", None), list) and isinstance(value, (list, tuple)):
+                raise RuntimeError_(
+                    f"{identifier!r} is a single-select {kind} (currently "
+                    f"{_display(getattr(el, 'value', None))}), but {_display(value)} is a list — "
+                    f"send one option, or rebuild the widget with selection_mode='multi'"
+                )
+            return
         if kind not in ("slider", "select_slider", "date_input"):
             return
         current = getattr(el, "value", None)
@@ -445,24 +526,55 @@ class AppTestRuntime:
         widget (#51). AppTest resolves either form to the real option (``set_value(2)`` and
         ``set_value("2")`` both land on the int ``2``), so both are accepted here."""
         options = list(getattr(el, "options", []) or [])
-        if not options or kind not in ("selectbox", "radio", "select_slider", "multiselect"):
+        choice_kinds = ("selectbox", "radio", "select_slider", "multiselect", *BUTTON_GROUP_KINDS)
+        if not options or kind not in choice_kinds:
             return
         offered = {str(o) for o in options}
         # multiselect carries a list of values; select_slider a single value OR a (lo, hi) range;
         # selectbox/radio a single value. Every element must be an offered option — the range form
-        # used to be skipped, so a bad handle silently reverted while reporting success (#33).
-        many = kind in ("select_slider", "multiselect")
+        # used to be skipped, so a bad handle silently reverted while reporting success (#33). A
+        # pills/segmented_control is whichever shape its selection_mode makes it, so it follows the
+        # value: a bad option reverts silently on a single-select, and is silently DROPPED from a
+        # multi-select (['y','NOPE'] lands as ['y']) — a partial write reported as a success.
+        many = kind in ("select_slider", "multiselect") or (
+            kind in BUTTON_GROUP_KINDS and isinstance(value, (list, tuple))
+        )
         values = list(value) if many and isinstance(value, (list, tuple)) else [value]
         invalid = [v for v in values if str(v) not in offered]
         if not invalid:
             return
-        if kind in ("selectbox", "radio"):
+        if not many:
             raise RuntimeError_(
                 f"{value!r} is not a valid option for {kind}; choose one of {options}"
             )
         raise RuntimeError_(
             f"{invalid!r} are not valid options for {kind}; choose from {options}"
         )
+
+    @classmethod
+    def _validate_feedback(cls, kind: str, identifier: str, el, value: Any) -> None:
+        """Reject an out-of-range or non-integer st.feedback rating before it is written.
+
+        Feedback is the worst-behaved of the kinds added here: AppTest neither raises nor reverts
+        an out-of-range index — it simply STORES it. A 5 on a 5-star widget (valid indices 0-4), a
+        99, or a -1 all stick, so an agent's bad rating becomes the app's state with no signal at
+        all. That is the silent-corruption family of #12/#31/#55 in its purest form, and the only
+        defence is the same one: check up front. A non-integer is worse still — it raises inside
+        the rerun and poisons the session (#10), so it has to be caught here too."""
+        if kind != "feedback":
+            return
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RuntimeError_(
+                f"{value!r} is not a valid rating for the feedback widget {identifier!r}; send a "
+                f"whole number (0 is the first option)"
+            )
+        hi = cls._feedback_max(el)
+        if value < 0 or (hi is not None and value > hi):
+            bound = f"0-{hi}" if hi is not None else "0 or greater"
+            raise RuntimeError_(
+                f"{value!r} is out of range for the feedback widget {identifier!r}; "
+                f"valid ratings are {bound}"
+            )
 
     @staticmethod
     def _validate_range(kind: str, el, value: Any) -> None:
@@ -596,7 +708,7 @@ class AppTestRuntime:
         raise RuntimeError_(f"{value!r} is not a valid boolean for {kind}; use true or false")
 
     @classmethod
-    def _coerce(cls, kind: str, value: Any) -> Any:
+    def _coerce(cls, kind: str, value: Any, el: Any = None) -> Any:
         # A clean, actionable error on a bad value beats a raw Python ValueError leaking to the
         # CLI/MCP boundary; coercing every element of a *range* (list/tuple) keeps the value
         # typed so _validate_range can bounds-check it instead of bailing on a str<date compare
@@ -607,6 +719,18 @@ class AppTestRuntime:
             return cls._to_date(value)
         if kind == "time_input":
             return cls._to_time(value)
+        if kind in BUTTON_GROUP_KINDS:
+            # A multi-select holds a list; a bare option means "select just this one" — the same
+            # convention multiselect uses below. Single-select is left alone, so a list sent to one
+            # still reaches _validate_arity and is rejected rather than quietly wrapped.
+            if isinstance(getattr(el, "value", None), list) and not isinstance(value, (list, tuple)):
+                return [value]
+            return value
+        if kind == "feedback" and isinstance(value, str):
+            try:  # a rating arrives as a string over the CLI (--set stars=3)
+                return int(value)
+            except ValueError:
+                return value  # left for _validate_feedback to reject with a useful message
         if kind == "number_input" and isinstance(value, str):
             try:
                 return int(value)
