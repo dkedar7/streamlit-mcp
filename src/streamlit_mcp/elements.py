@@ -110,6 +110,61 @@ def is_range_widget(model: dict) -> bool:
     return model["kind"] in RANGE_KINDS and isinstance(model.get("value"), list)
 
 
+def _recover_typed(sample: Any, text: str) -> Any:
+    """Parse a stringified option back into ``sample``'s type, or None if it can't be recovered
+    exactly. The ``str(recovered) == text`` round-trip check is what keeps this honest: we only ever
+    advertise a typed form that stringifies back to the very option it came from, so the typed and
+    string members of an enum always denote the same option. An option that doesn't survive the
+    round-trip (``'two'`` among int options) is simply left in its string form."""
+    kind = type(sample)
+    try:
+        if kind is bool:  # bool(str) is truthy for any non-empty string, so map the two forms
+            return {"True": True, "False": False}.get(text)
+        recovered = kind(text)
+    except (TypeError, ValueError):
+        return None
+    return recovered if str(recovered) == text else None
+
+
+def _choice_value_schema(model: dict, options: list) -> dict:
+    """The value-schema for an options widget (selectbox/radio/select_slider/multiselect).
+
+    AppTest reports a widget's options **stringified** but its value in the **real type**, so a
+    widget built from non-string options — ``st.selectbox('Year', [2023, 2024, 2025])``, ubiquitous
+    — advertised ``enum: ['2023','2024','2025']`` while reporting ``value: 2023``: a value that is
+    neither a member of nor the type of the schema the same call advertises (#62). #51 fixed only
+    the *write* path (set_widget matches on string form); the advertised model stayed
+    self-inconsistent.
+
+    The runtime cannot tell us the true option types — the widget protobuf carries options already
+    stringified (``options: "2023"``), so the current value's type is the only evidence there is.
+    We use it to recover the typed form of **every** option, not just the selected one: an agent
+    must be able to construct *any* valid set from what's advertised, not merely echo back the
+    selection it was handed. Both forms are advertised because set_widget accepts both (#51), and
+    the strict ``type: "string"`` is dropped since a mixed enum has no single type.
+
+    Known limitation: a widget with **no** current selection (``st.multiselect('Nums', [1,2,3])``,
+    default empty) offers no type evidence, so its enum stays the string form. That is still
+    correct and usable — the string form is always settable — just less informative, and the
+    self-consistency invariant holds trivially (there is no value to contradict it)."""
+    value = model.get("value")
+    selected = value if isinstance(value, list) else [value]
+    typed = [v for v in selected if v is not None and not isinstance(v, str)]
+    if not typed:
+        return {"type": "string", "enum": list(options)}
+    sample = typed[0]
+    recovered: list = []
+    for opt in options:
+        rec = _recover_typed(sample, opt)
+        if rec is not None and rec not in recovered:
+            recovered.append(rec)
+    enum = recovered + [o for o in options if o not in recovered]
+    for v in typed:  # the reported value is a member by construction, even if it didn't round-trip
+        if v not in enum:
+            enum.append(v)
+    return {"enum": enum}
+
+
 def _make_nullable(value_schema: dict) -> dict:
     """Widen a value-schema to also permit null. A widget built with ``value=None`` / ``index=None``
     (a text/number/date/time placeholder, or a 'please select…' selectbox/radio) reports
@@ -141,9 +196,9 @@ def tool_schema_for(model: dict) -> dict:
         if "max" in c:
             value["maximum"] = c["max"]
     elif kind in ("selectbox", "radio", "select_slider"):
-        value = {"type": "string", "enum": list(c.get("options", []))}
+        value = _choice_value_schema(model, list(c.get("options", [])))
     elif kind == "multiselect":
-        value = {"type": "array", "items": {"type": "string", "enum": c.get("options", [])}}
+        value = {"type": "array", "items": _choice_value_schema(model, list(c.get("options", [])))}
     elif kind in ("checkbox", "toggle"):
         value = {"type": "boolean"}
     elif kind == "date_input":
