@@ -87,8 +87,8 @@ their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
 `[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
 form's submit button.
 
-Input widgets streamlit-mcp can't drive (file_uploader, camera_input, chat_input, pills,
-segmented_control, feedback, …) are reported explicitly on every surface (text `--layout`,
+Input widgets streamlit-mcp can't drive (file_uploader, camera_input, audio_input, chat_input,
+data_editor, …) are reported explicitly on every surface (text `--layout`,
 `--json`, MCP `get_layout`), never silently dropped — wherever they're placed, including
 `st.sidebar.file_uploader(...)` and inside columns, tabs and containers.
 
