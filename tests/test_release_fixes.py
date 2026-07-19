@@ -1140,6 +1140,57 @@ def test_strict_exits_nonzero_when_the_app_raised(tmp_path, argv):
     assert main([argv[0], str(app), *argv[1:]]) == 1
 
 
+# --- 0.6.0 #64: a command's --json form carries every field its own text form prints ---
+@pytest.mark.parametrize("argv", [
+    ["call", "--read"],
+    ["call", "--state"],
+    ["inspect", "--layout"],
+    ["inspect"],
+])
+def test_json_form_reports_the_exception_its_text_form_prints(tmp_path, capsys, argv):
+    """The text/--json parity invariant, asserted once over every command form rather than surface
+    by surface — the whole exception-plumbing family (#27/#58/#64) has been a game of whack-a-mole
+    precisely because each surface was fixed on its own.
+
+    #58 made all four *text* forms print a crashed app's exception, but two of the --json forms
+    still dropped it — bare `inspect --json` (#64) and `call --state --json` (the same bug, unfiled)
+    — because those payloads come from list_widgets/get_state, which don't carry the field. A script
+    doing `inspect --json | jq .exception` saw null on an app the human watched crash."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "boom.py"
+    app.write_text(BOOM_APP)
+
+    assert main([argv[0], str(app), *argv[1:]]) == 0
+    text = capsys.readouterr().out
+    assert main([argv[0], str(app), *argv[1:], "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert "exception: kaboom: config missing" in text   # the text form reports the crash...
+    assert payload.get("exception") == "kaboom: config missing"  # ...so its --json form must too
+
+
+def test_state_json_never_displaces_an_app_key_named_exception(tmp_path, capsys):
+    """`--state --json` is the app's own key namespace, so the injected field must not overwrite a
+    widget the app itself keyed `exception` — the one payload where our field and a user's can
+    collide."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "collide.py"
+    app.write_text("import streamlit as st\n"
+                   "st.text_input('E', value='mine', key='exception')\n"
+                   "raise ValueError('kaboom: config missing')\n")
+    assert main(["call", str(app), "--state", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["exception"] == "mine"
+
+
+def test_healthy_app_json_is_unchanged(tmp_path, capsys):
+    """No exception, no injected field: the fix must not add a key to every healthy payload."""
+    from streamlit_mcp.cli import main
+    app = tmp_path / "ok.py"
+    app.write_text("import streamlit as st\nst.text_input('Name', key='name')\n")
+    assert main(["inspect", str(app), "--json"]) == 0
+    assert "exception" not in json.loads(capsys.readouterr().out)
+
+
 def test_strict_is_a_no_op_on_a_clean_app(tmp_path, capsys):
     from streamlit_mcp.cli import main
     app = tmp_path / "ok.py"
