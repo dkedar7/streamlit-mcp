@@ -136,10 +136,31 @@ def _report_exception(exception: Optional[str], args: argparse.Namespace) -> int
     already gets over MCP and what --json carries — #58), and return the exit code. By default an
     app-level exception is a reported field, not a failure: over MCP it comes back with
     ``isError=False``, so the CLI mirrors that with exit 0 unless ``--strict`` is set. Printing is
-    skipped for --json, whose payload already carries the field."""
+    skipped for --json, whose payload carries the field instead (see _with_exception)."""
     if exception and not getattr(args, "json", False):
         print(f"  exception: {exception}")
     return 1 if getattr(args, "strict", False) and exception else 0
+
+
+def _with_exception(payload: dict, exception: Optional[str]) -> dict:
+    """Ensure a ``--json`` payload carries the app-level exception its own text form prints.
+
+    A command's text and ``--json`` forms must report the same fields — a script doing
+    ``inspect --json | jq .exception`` has to see what the human running plain ``inspect`` sees.
+    They drifted because the exception reaches the two paths differently: it is computed once for
+    the text/exit-code path, while the JSON path just dumps whatever the engine call returned — and
+    only *some* of those carry it. ``get_layout``/``read_output`` do; ``list_widgets``/``get_state``
+    don't, because they mirror MCP tools that don't. So bare ``inspect --json`` and
+    ``call --state --json`` silently dropped a crash their text forms reported (#64 — the residual
+    half of #58, which fixed the text side of exactly this split).
+
+    Injecting the already-computed value keeps one source of truth rather than recomputing it per
+    surface, which is how this family kept re-opening surface by surface. A payload that already
+    has the key is left alone: ``read_output`` supplies its own, and ``get_state`` is the app's own
+    key namespace, where a widget keyed ``exception`` must not be overwritten by ours."""
+    if exception is not None and "exception" not in payload:
+        return {**payload, "exception": exception}
+    return payload
 
 
 # --------------------------------------------------------------------- commands
@@ -176,7 +197,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if tools:
         out["tools"] = tools
     if args.json:
-        print(json.dumps(out, indent=2, default=str))
+        print(json.dumps(_with_exception(out, exception), indent=2, default=str))
         return _report_exception(exception, args)
     for w in out["widgets"]:
         flag = " [action]" if w.get("action") else ""
@@ -243,7 +264,7 @@ def cmd_call(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
     if args.json:
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps(_with_exception(result, exception), indent=2, default=str))
     elif args.state:
         for k, v in result.items():
             print(f"  {k} = {v!r}")
