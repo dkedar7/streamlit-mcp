@@ -52,6 +52,10 @@ SUPPORTED_KINDS = (
 # Output element kinds we render to agent-readable text.
 OUTPUT_KINDS = ("title", "header", "subheader", "markdown", "caption", "text")
 
+# The two container nodes _walk yields before their children. They bracket the tree rather than
+# being content in it, so they never count as the last rendered element (see _exception).
+_ROOT_BLOCKS = ("sidebar", "main")
+
 
 def _display(value: Any) -> str:
     """A value as it should read in an error message an agent or human acts on: dates and times as
@@ -209,10 +213,41 @@ class AppTestRuntime:
             return {}
 
     def _exception(self) -> Optional[str]:
+        """The app's *uncaught* exception, if it crashed — not every exception it displays.
+
+        Streamlit renders a deliberate ``st.exception(e)`` and an uncaught crash as the SAME
+        element kind, and its testing API exposes no flag separating them: there is no
+        SCRIPT_STOPPED_WITH_EXCEPTION event (an uncaught runtime error still reports
+        SCRIPT_STOPPED_WITH_SUCCESS — only *compile* errors get their own event), and
+        ``stack_trace`` doesn't discriminate either, since ``st.exception(e)`` on a *caught*
+        exception carries a real traceback identical in shape to a crash's. So reading every
+        exception element reported an app that merely handled an error as having crashed, and
+        ``--strict`` failed CI for a healthy app (#69).
+
+        The one sound signal is position: an uncaught exception HALTS the script, so nothing can
+        render after it. Anything following an exception element therefore proves the script kept
+        running and that exception was deliberate. This holds even for awkward placements — a crash
+        inside ``with st.sidebar:`` or inside an expander still renders its exception element last.
+
+        The converse does not hold: a deliberate ``st.exception(e)`` as the app's final statement
+        is genuinely indistinguishable from a crash, and that case keeps reporting. Missing a real
+        crash would break the guarantee #27/#58/#64 exist to give, where over-reporting is only
+        noisy — so the ambiguity is resolved toward reporting, deliberately.
+        """
         exc = getattr(self.at, "exception", None)
         if not exc:
             return None
-        try:
+        last = None
+        for el in self._walk():
+            # The roots themselves are yielded before their children, so they never stand as the
+            # final element — skipping them keeps an empty sidebar from masking a real crash.
+            if getattr(el, "type", None) not in _ROOT_BLOCKS:
+                last = el
+        if last is not None and getattr(last, "type", None) != "exception":
+            return None  # the script ran past every exception it rendered — all deliberate
+        if last is not None:
+            return str(getattr(last, "value", last))
+        try:  # nothing rendered at all; report whatever the run surfaced
             return "; ".join(str(getattr(e, "value", e)) for e in exc)
         except TypeError:
             return str(exc)
