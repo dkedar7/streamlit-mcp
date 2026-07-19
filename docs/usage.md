@@ -70,10 +70,17 @@ tabs and containers.
     session usable and never silently mutates state.
 
 !!! note "Option types"
-    A widget built from non-string options (`st.selectbox("Pick", [1, 2, 3])`) advertises its
-    options in the string form Streamlit displays (`["1", "2", "3"]`) while reporting its value in
-    the real type (`1`) — that's what Streamlit's own testing API exposes. Both forms are accepted:
-    `set_widget("Pick", 2)` and `set_widget("Pick", "2")` both select the real option `2`.
+    A widget built from non-string options (`st.selectbox("Pick", [1, 2, 3])`) reports its value in
+    the real type (`1`) while `constraints.options` lists the string form Streamlit displays
+    (`["1", "2", "3"]`) — that's what Streamlit's own testing API exposes. Both forms are accepted:
+    `set_widget("Pick", 2)` and `set_widget("Pick", "2")` both select the real option `2`, and the
+    advertised `schema` says so — its `enum` carries **both** (`[1, 2, 3, "1", "2", "3"]`), so the
+    reported value is always a member of its own schema and any option can be set in either form.
+
+    The value's type is the only evidence of the real option type available at runtime (Streamlit
+    hands over options already stringified), so a widget with **nothing selected** — an untouched
+    `st.multiselect("Nums", [1, 2, 3])` — advertises the string form alone. That form is always
+    settable, so the round-trip still works.
 
 !!! note "Placeholder (null) widgets"
     A widget built with `value=None` / `index=None` — a `text_input`/`text_area`/`number_input`/
