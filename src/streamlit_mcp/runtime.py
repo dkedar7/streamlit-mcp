@@ -50,7 +50,31 @@ SUPPORTED_KINDS = (
 )
 
 # Output element kinds we render to agent-readable text.
-OUTPUT_KINDS = ("title", "header", "subheader", "markdown", "caption", "text")
+#
+# The prose kinds alone left an agent unable to see the two things an app most often says back to
+# it. The STATUS kinds are the load-bearing ones: an agent that sets a field and clicks submit had
+# no way to tell whether the app answered st.success("Saved") or st.error("Invalid date") — the
+# outcome of its own action was invisible, so it could only re-read widget values and guess. The
+# DATA kinds carry the results an app reports through (a metric on a dashboard, a table of rows,
+# a JSON payload) rather than through markdown.
+#
+# `exception` is deliberately NOT here. An *uncaught* crash renders as an `exception` element too,
+# indistinguishable from a deliberate st.exception(e), so including it would duplicate the crash
+# into `outputs` — and the crash already has its own dedicated surface, the snapshot's `exception`
+# field (#27/#58/#64). One surface per fact.
+OUTPUT_KINDS = (
+    # prose
+    "title", "header", "subheader", "markdown", "caption", "text",
+    # status — what the app says about what just happened
+    "success", "error", "warning", "info",
+    # data — results reported as something other than prose
+    "metric", "code", "json", "dataframe", "table",
+)
+
+# An output's text becomes agent context, and some kinds are unbounded: st.json serializes a whole
+# structure (a 2000-element list is ~11 KB), where a DataFrame self-truncates through pandas. Cap
+# what any single element contributes so one big output can't crowd out the rest of the app.
+MAX_OUTPUT_CHARS = 2000
 
 
 def _display(value: Any) -> str:
@@ -187,15 +211,44 @@ class AppTestRuntime:
         for el in self._walk():
             kind = getattr(el, "type", None)
             if kind in output_kinds:
-                val = getattr(el, "value", None)
-                if val is not None:
-                    outputs.append(OutputSnapshot(kind=kind, text=str(val)))
+                text = self._output_text(kind, el)
+                if text is not None:
+                    outputs.append(OutputSnapshot(kind=kind, text=text))
         return RuntimeSnapshot(
             widgets=widgets,
             outputs=outputs,
             session_state=self._session_state(),
             exception=self._exception(),
         )
+
+    @classmethod
+    def _output_text(cls, kind: str, el) -> Optional[str]:
+        """One output element as the line an agent reads, or None to skip it.
+
+        A `metric` needs assembling rather than stringifying: its `value` is the bare number
+        ("1234"), so rendering it like the prose kinds would drop the label and delta that give it
+        meaning — a dashboard of four metrics would read as four anonymous numbers."""
+        try:
+            value = getattr(el, "value", None)
+        except Exception:
+            # AppTest raises rather than returning None for some elements' `value` (a link_button
+            # whose state was never registered raises KeyError). An unreadable output is skipped,
+            # never fatal to the whole snapshot.
+            return None
+        if value is None:
+            return None
+        if kind == "metric":
+            label = getattr(el, "label", None)
+            delta = getattr(el, "delta", None)
+            text = f"{label}: {value}" if label else str(value)
+            return f"{text} ({delta})" if delta else text
+        return cls._truncate(str(value))
+
+    @staticmethod
+    def _truncate(text: str) -> str:
+        if len(text) <= MAX_OUTPUT_CHARS:
+            return text
+        return text[:MAX_OUTPUT_CHARS] + f"… [truncated, {len(text)} chars total]"
 
     def _session_state(self) -> dict:
         ss = self.at.session_state
