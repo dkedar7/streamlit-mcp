@@ -75,13 +75,16 @@ tabs and containers.
     the real type (`1`) — that's what Streamlit's own testing API exposes. Both forms are accepted:
     `set_widget("Pick", 2)` and `set_widget("Pick", "2")` both select the real option `2`.
 
-!!! note "Placeholder (no-selection) widgets"
-    A `selectbox`/`radio` built with `index=None` (the "please select…" placeholder) starts with no
-    selection: its value is `null`, its schema is nullable (`{"type": ["string","null"], "enum":
-    [...options, null]}`), and `set_widget(id, null)` (CLI `--set "Choose=null"`) **clears the
-    selection** back to the placeholder — so the value round-trips and a "reset this filter" flow
-    works. A regular `selectbox`/`radio` (with a default selection) has no no-selection state and
-    rejects `null`.
+!!! note "Placeholder (null) widgets"
+    A widget built with `value=None` / `index=None` — a `text_input`/`text_area`/`number_input`/
+    `date_input`/`time_input` empty-field placeholder, or a "please select…" `selectbox`/`radio` —
+    starts with no value: it reports `value: null` and advertises a nullable schema (e.g.
+    `{"type": ["string","null"]}`). Setting it to `null` (`set_widget(id, null)`) **returns it to
+    that no-value state**, so the value round-trips and a "reset this field/filter" flow works.
+    A *regular* widget of the same kind (with a real default) has no no-value state and rejects
+    `null` — atomically, leaving its value intact. (Over the CLI, JSON-typed values go through
+    `--set`'s JSON parse, so `null` reaches an option/number widget; a text field takes `--set`
+    verbatim per #43, so send its `null` over MCP or clear it another way.)
 
 !!! note "App exceptions"
     If the served app raises an uncaught exception, it's captured in the `exception` field and

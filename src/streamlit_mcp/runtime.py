@@ -223,10 +223,12 @@ class AppTestRuntime:
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
         coerced = self._coerce(kind, value)
-        # Clearing a selectbox/radio to no-selection (null) is the placeholder pattern's own state,
-        # not an option — it takes a separate attempt-and-verify path (#57), see _clear_selection.
-        if coerced is None and kind in ("selectbox", "radio"):
-            self._clear_selection(identifier, kind, el)
+        # Setting a widget to null means "return it to its no-value/no-selection state" — the state
+        # a value=None / index=None placeholder is born in and reports as its value. It's not an
+        # option/number/date to validate, so it takes one shared attempt-and-verify path across
+        # every kind (#57 selectbox/radio, #60 text/number), see _clear_to_none.
+        if coerced is None:
+            self._clear_to_none(identifier, kind, el)
             return
         # Reject a bad value BEFORE writing it. An invalid *option* raises inside at.run()
         # and the pending bad value poisons every later call (#10); an out-of-range *number/
@@ -253,29 +255,29 @@ class AppTestRuntime:
                 f"setting {identifier!r} to {value!r} failed and was rolled back: {e}"
             ) from e
 
-    def _clear_selection(self, identifier: str, kind: str, el) -> None:
-        """Set a selectbox/radio to no-selection (null) — the state of a widget built with
-        ``index=None`` (the ubiquitous 'please select…' placeholder). Its value is reported as
-        null, so an agent must be able to send null straight back (#57); a real option is rejected
-        by _validate_choice, but null is that widget's own valid state, not an option.
-
-        Only an ``index=None`` widget supports it. A regular (``index=0``) selectbox/radio does NOT
-        clear when set to None — AppTest silently keeps the value or resets it to the widget default
-        (whichever, it diverges from the requested null without raising), and exposes no up-front
-        'nullable' flag to tell the two apart — even a placeholder that currently holds a selection
-        looks identical to a regular one. So this is the one write that can't be pre-validated; it's
-        caught by VERIFYING the selection actually cleared. That's sound here because null is never
-        a value-corrupting write to attempt: if it doesn't take, we roll the prior value back and
-        reject, so the set stays atomic and a non-clear is never reported as success — the same
-        guarantee the up-front checks (#12/#31/#55) give the writes that WOULD poison or corrupt."""
+    def _clear_to_none(self, identifier: str, kind: str, el) -> None:
+        """Set any widget to null — its no-value/no-selection state. A widget built with
+        ``value=None`` / ``index=None`` (a text/number/date/time placeholder, or a 'please select…'
+        selectbox/radio) is born holding null and reports it as its value, so an agent must be able
+        to send null straight back (#57/#60). This is the one write that can't be pre-validated:
+        AppTest exposes no 'is nullable' flag, and a placeholder that currently holds a value looks
+        identical to a regular widget. It doesn't need to be — null is never a value-corrupting
+        write to attempt. A widget that supports null accepts it and reads back null; one that
+        doesn't (a regular selectbox, a plain text field) silently keeps its value or resets to its
+        default, never raising. So we set null and VERIFY it took: if the value didn't become null,
+        roll the prior value back and reject, keeping the set atomic and never reporting a non-clear
+        as success — the same guarantee the up-front checks (#12/#31/#55) give value-corrupting
+        writes, reached here by detection since there's nothing harmful to prevent."""
         prior = getattr(el, "value", None)
+        if prior is None:
+            return  # already null — an agent echoing back the reported value; nothing to change
         self._set(kind, el, None)
         try:
             self._run_script()
         except Exception as e:
             self._rollback(identifier, prior)
             raise RuntimeError_(
-                f"clearing {identifier!r} to no-selection failed and was rolled back: {e}"
+                f"clearing {identifier!r} to null failed and was rolled back: {e}"
             ) from e
         _, after = self._find(identifier)
         if getattr(after, "value", None) is not None:
@@ -283,9 +285,10 @@ class AppTestRuntime:
             # Restore the prior value so the failed set leaves state untouched, then reject.
             self._rollback(identifier, prior)
             options = list(getattr(el, "options", []) or [])
+            hint = f" Choose one of {options}." if options else ""
             raise RuntimeError_(
-                f"{kind} {identifier!r} cannot be set to null (no selection); it was not created "
-                f"with index=None. Choose one of {options}"
+                f"{kind} {identifier!r} cannot be set to null: it has no no-value state (it was not "
+                f"created with value=None / index=None).{hint}"
             )
 
     def click(self, identifier: str) -> None:
@@ -533,8 +536,11 @@ class AppTestRuntime:
             # widget) means "select just this one" — wrap it rather than handing AppTest a scalar
             # it would choke on iterating
             return [value]
-        if kind in ("text_input", "text_area") and not isinstance(value, str):
-            # a JSON-typed value (True/41/None) bound for a text field becomes its string
+        if kind in ("text_input", "text_area") and value is not None and not isinstance(value, str):
+            # a JSON-typed value (True/41) bound for a text field becomes its string (#43). But
+            # None is the field's own no-value sentinel (a value=None placeholder reports it), not a
+            # value to stringify: str(None) -> "None" silently stored a wrong value at isError=False
+            # (#60). None passes through to the shared null path (set_widget -> _clear_to_none).
             return str(value)
         return value
 

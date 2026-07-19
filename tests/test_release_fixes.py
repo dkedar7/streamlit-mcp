@@ -583,7 +583,8 @@ TYPED_OPTIONS_APP = (
     "import streamlit as st\n"
     "st.selectbox('Pick', [1, 2, 3], key='pick')\n"
     "st.radio('Rate', [10, 20, 30], key='rate')\n"
-    "st.multiselect('Nums', [1, 2, 3], default=[2], key='nums')\n"
+    "st.multiselect('Nums', [1, 2, 3], key='nums')\n"          # no selection -> no type evidence
+    "st.multiselect('Picked', [1, 2, 3], default=[2], key='picked')\n"
     "st.select_slider('Size', options=[10, 20, 30], key='size')\n"
 )
 
@@ -633,24 +634,108 @@ def test_every_advertised_value_is_settable_back_verbatim():
         eng.set_widget(w["identifier"], w["value"])  # must not raise
 
 
-def test_non_string_option_values_satisfy_their_advertised_schema():
-    """Typed choice values must belong to the enum advertised alongside them."""
+# --- 0.6.0 #62: the advertised model must validate against its own advertised schema ---
+def _value_schema(widget: dict) -> dict:
+    """The schema a single settable value must satisfy (unwrapping multiselect's array)."""
+    schema = widget["schema"]["properties"]["value"]
+    return schema["items"] if widget["kind"] == "multiselect" else schema
+
+
+def test_non_string_option_value_is_a_member_of_its_own_advertised_enum():
+    """The (a)-half of #57, still open for non-string options (#62): a widget built from typed
+    options reported `value: 2023` against `{"type":"string","enum":["2023",...]}` — a value that
+    is neither a member of nor the type of the schema the same call advertises. #51 fixed only the
+    write path; the advertised model stayed self-inconsistent."""
     from streamlit_mcp.engine import Engine
     from streamlit_mcp.runtime import AppTestRuntime
     rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
     rt.run()
-
     widgets = {w["identifier"]: w for w in Engine(rt).list_widgets()["widgets"]}
-    for identifier in ("pick", "rate", "size"):
-        widget = widgets[identifier]
-        value_schema = widget["schema"]["properties"]["value"]
-        assert widget["value"] in value_schema["enum"]
-        assert "type" not in value_schema
 
-    multiselect = widgets["nums"]
-    item_schema = multiselect["schema"]["properties"]["value"]["items"]
-    assert all(value in item_schema["enum"] for value in multiselect["value"])
-    assert "type" not in item_schema
+    for identifier in ("pick", "rate", "size"):
+        schema = _value_schema(widgets[identifier])
+        assert widgets[identifier]["value"] in schema["enum"]
+        assert "type" not in schema  # a mixed typed/string enum has no single JSON-Schema type
+    for value in widgets["picked"]["value"]:
+        assert value in _value_schema(widgets["picked"])["enum"]
+
+
+def test_every_non_selected_option_is_advertised_in_its_typed_form_too():
+    """Echoing back the current selection is not enough — an agent must be able to construct *any*
+    valid set from what's advertised. set_widget accepts typed 2 on a [1,2,3] selectbox, so the
+    enum has to say so even while 1 is selected (the gap left by keying the enum off the current
+    value alone)."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    widgets = {w["identifier"]: w for w in Engine(rt).list_widgets()["widgets"]}
+
+    assert widgets["pick"]["value"] == 1                      # 1 is selected...
+    enum = _value_schema(widgets["pick"])["enum"]
+    assert 2 in enum and 3 in enum                            # ...but 2 and 3 are advertised typed
+    assert "2" in enum and "3" in enum                        # and the string form stays accepted
+    assert _value_schema(widgets["rate"])["enum"] == [10, 20, 30, "10", "20", "30"]
+
+
+def test_every_advertised_enum_member_is_actually_settable():
+    """The invariant that makes the schema honest, stated directly: everything the enum offers can
+    be sent to set_widget. Guards both directions of the #62 family — an enum that omits a valid
+    value misleads a schema-following agent, and one that offers an invalid value gets it
+    rejected."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    eng = Engine(rt)
+    for widget in eng.list_widgets()["widgets"]:
+        for member in _value_schema(widget)["enum"]:
+            value = [member] if widget["kind"] == "multiselect" else member
+            eng.set_widget(widget["identifier"], value)  # must not raise
+
+
+def test_string_options_are_unchanged_and_stay_strictly_typed():
+    """A genuinely-string-option widget must not gain a widened enum — no behaviour change for the
+    common case."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script="import streamlit as st\nst.selectbox('S', ['a', 'b'], key='s')\n")
+    rt.run()
+    schema = _value_schema(Engine(rt).list_widgets()["widgets"][0])
+    assert schema == {"type": "string", "enum": ["a", "b"]}
+
+
+def test_multiselect_without_a_selection_falls_back_to_the_string_form():
+    """Documented limitation: with nothing selected there is no type evidence (the protobuf carries
+    options already stringified), so the enum stays the string form — still correct and settable,
+    just less informative. Asserted so the fallback stays deliberate."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=TYPED_OPTIONS_APP)
+    rt.run()
+    eng = Engine(rt)
+    nums = {w["identifier"]: w for w in eng.list_widgets()["widgets"]}["nums"]
+    assert nums["value"] == []
+    assert _value_schema(nums) == {"type": "string", "enum": ["1", "2", "3"]}
+    eng.set_widget("nums", ["2"])  # the advertised string form is genuinely settable
+    assert eng.list_widgets()["widgets"][2]["value"] == [2]
+
+
+def test_typed_enum_recovery_skips_options_that_do_not_round_trip():
+    """Only a typed form that stringifies back to its own option is advertised, so mixed or
+    non-recoverable option lists degrade to the string form instead of inventing members."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script="import streamlit as st\n"
+                               "st.selectbox('M', [1, 'two', 3.0], key='m')\n"
+                               "st.selectbox('B', [True, False], key='b')\n")
+    rt.run()
+    widgets = {w["identifier"]: w for w in Engine(rt).list_widgets()["widgets"]}
+    # value 1 (int): '1' recovers, 'two' and '3.0' do not -> they stay string-only
+    assert widgets["m"]["value"] in _value_schema(widgets["m"])["enum"]
+    assert _value_schema(widgets["m"])["enum"] == [1, "1", "two", "3.0"]
+    # bool needs its own mapping: bool('False') is True, which would advertise a wrong member
+    assert _value_schema(widgets["b"])["enum"] == [True, False, "True", "False"]
 
 
 def test_int_number_input_rejects_a_fractional_value():
@@ -1096,3 +1181,103 @@ def test_guardrail_denial_still_exits_one_regardless_of_strict(tmp_path, capsys)
     app = tmp_path / "ok.py"
     app.write_text("import streamlit as st\nst.text_input('Name', key='name')\n")
     assert main(["call", str(app), "--read-only", "--set", "Name=x"]) == 1
+
+
+# --- 0.5.1 #60: value=None placeholders (text/number/date/time) round-trip null, uniformly ---
+# The null-placeholder class is now handled by ONE shared path (schema: _make_nullable by value;
+# write: _clear_to_none for any kind), so it can't re-open widget-by-widget the way #57 (fixed only
+# selectbox/radio) left it open for text_input/text_area/number_input.
+NULLABLE_APP = (
+    "import streamlit as st\n"
+    "st.text_input('Name', value=None, key='name')\n"
+    "st.text_area('Bio', value=None, key='bio')\n"
+    "st.number_input('Qty', value=None, key='qty')\n"
+    "st.date_input('When', value=None, key='when')\n"
+    "st.time_input('At', value=None, key='at')\n"
+    "st.selectbox('Pick', ['a', 'b'], index=None, key='pick')\n"  # the #57 case, same path
+)
+
+
+def test_value_none_placeholders_advertise_a_nullable_schema():
+    """Bug B: a widget reporting value: null must advertise a schema that permits null, or the
+    read output contradicts its own schema. #57 fixed this for selectbox/radio; it stayed broken
+    for text_input/text_area/number_input (and, latently, date/time) — now fixed uniformly (#60)."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    for w in Engine(rt).list_widgets()["widgets"]:
+        assert w["value"] is None, w["identifier"]
+        t = w["schema"]["properties"]["value"]["type"]
+        assert "null" in t, (w["identifier"], t)  # every null-valued widget's schema allows null
+
+
+@pytest.mark.parametrize("identifier", ["name", "bio", "qty", "when", "at", "pick"])
+def test_value_none_placeholder_round_trips_null(identifier):
+    """Bug A + the round-trip: echoing the reported value: null back must store null, not corrupt
+    it. text_input/text_area used to store the string 'None' (str(None)) at isError=False."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    rt.set_widget(identifier, None)  # must not raise
+    assert rt.snapshot().session_state[identifier] is None  # null, not the string "None"
+
+
+def test_text_placeholder_null_is_not_stringified():
+    """The specific #60 corruption, pinned: None on a text field must stay None, never become the
+    literal string 'None' (the str(value) coercion added for #43 wrongly caught None)."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    rt.set_widget("name", None)
+    stored = rt.snapshot().session_state["name"]
+    assert stored is None and stored != "None"
+
+
+def test_text_field_still_stringifies_non_none_json_values():
+    """The #43 behavior must survive: a JSON-typed non-None value on a text field still becomes its
+    string (True -> 'True', 41 -> '41') — only None is exempted."""
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script="import streamlit as st\nst.text_input('C', key='c')\n")
+    rt.run()
+    rt.set_widget("c", True)
+    assert rt.snapshot().session_state["c"] == "True"
+
+
+@pytest.mark.parametrize("script,identifier,prior", [
+    ("import streamlit as st\nst.text_input('R', key='r')\n", "r", ""),        # regular text (value="")
+    ("import streamlit as st\nst.number_input('N', value=5, key='n')\n", "n", 5),  # regular number
+    ("import streamlit as st\nst.selectbox('S', ['a', 'b'], key='s')\n", "s", "a"),  # regular selectbox
+])
+def test_non_nullable_widget_rejects_null_atomically(script, identifier, prior):
+    """A widget that is NOT a placeholder has no no-value state: AppTest silently keeps its value
+    when set to null. That must be rejected (not reported as a success), with the prior value
+    intact — the same silent-revert guarantee as #12/#31/#55, verified by attempt-and-check since
+    null can't be told apart from a valid clear up front."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    with pytest.raises(RuntimeError_, match="cannot be set to null"):
+        rt.set_widget(identifier, None)
+    assert rt.snapshot().session_state[identifier] == prior  # untouched
+
+
+def test_every_advertised_value_round_trips_including_nulls():
+    """The round-trip guarantee stated directly, now spanning the whole null-placeholder class:
+    every value list_widgets advertises (null included) can be sent straight back."""
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=NULLABLE_APP)
+    rt.run()
+    eng = Engine(rt)
+    for w in eng.list_widgets()["widgets"]:
+        eng.set_widget(w["identifier"], w["value"])  # value: null included — must not raise
+
+
+def test_number_input_none_schema_keeps_its_bounds():
+    """Making the type nullable must not drop the min/max the schema already carried."""
+    from streamlit_mcp.elements import tool_schema_for
+    schema = tool_schema_for({"kind": "number_input", "value": None,
+                              "constraints": {"min": 0, "max": 10}})["properties"]["value"]
+    assert schema["type"] == ["number", "null"]
+    assert schema["minimum"] == 0 and schema["maximum"] == 10
