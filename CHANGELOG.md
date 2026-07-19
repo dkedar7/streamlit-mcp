@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.7.0 (2026-07-19)
+
+Widens what an agent can **see** and **drive**, plus one crash-reporting false positive. The
+supported list turned out to be stale rather than accurate — three widgets it called undrivable
+are drivable, and the read surface had a larger gap than any of them.
+
+- **New:** an agent can now see the **status and data outputs** an app renders, not just its prose.
+  Previously only `title`/`header`/`subheader`/`markdown`/`caption`/`text` were reported, so an
+  agent that filled a form and clicked submit **could not tell whether the app answered
+  `st.success("Saved")` or `st.error("Name is required")`** — the outcome of its own action was
+  invisible, leaving it to re-read widget values and guess. Adds the status kinds (`success`,
+  `error`, `warning`, `info`) and the data kinds (`metric`, `code`, `json`, `dataframe`, `table`).
+
+    A `metric` is assembled rather than stringified — its `value` is the bare number, so a
+    dashboard of four metrics read as four anonymous numbers; it now reports as
+    `Total: $4,210 (+8%)`. Output text is capped, because `st.json` serializes a whole structure
+    (~11 KB for a 2000-element list) where a DataFrame self-truncates, and one output should not
+    crowd out the rest of the app.
+
+- **New:** `st.pills`, `st.segmented_control` and `st.feedback` are **supported widgets**, no
+  longer reported as undrivable. `pills` and `segmented_control` share the `button_group` protobuf
+  name in the element tree — which is why they were written off — but Streamlit's typed accessors
+  tell them apart, so they are driven under the names you write in the app. A `feedback` widget's
+  scale (`thumbs` 0-1, `faces`/`stars` 0-4) is read off the widget proto by enum name.
+
+    All three corrupt silently when driven naively, so each is guarded up front, in the tradition
+    of #12/#31/#55: a bad option on a single-select **reverts with no exception**; a bad member of
+    a multi-select is **silently dropped** (`['y','NOPE']` lands as `['y']` — a partial write
+    reported as success, #33); and an out-of-range `feedback` rating is neither rejected nor
+    reverted but **stored** — `5` on a 5-star widget, `99`, `-1` all stuck. A `selection_mode` is
+    not exposed by Streamlit, so the value's shape is the signal (a list means multi), the same
+    signal a range widget gives.
+
+- **Fix:** a deliberate **`st.exception(e)` is no longer reported as an app crash** (#69). It is
+  the documented way to *show* a handled error, but every exception element was read as the app's
+  uncaught exception — so an app that handles errors correctly looked broken on every surface, and
+  `--strict` failed CI for it. Streamlit offers nothing that separates the two directly (there is
+  no `SCRIPT_STOPPED_WITH_EXCEPTION` event, and a caught exception displayed on purpose carries a
+  real stack trace just like a crash), but an uncaught exception **halts the script** — so anything
+  rendered after an exception element proves it was deliberate. Deliberately partial: a lone
+  `st.exception(e)` as an app's final statement is indistinguishable from a crash and keeps
+  reporting, because missing a real crash would break the guarantee #27/#58/#64 exist to give.
+
+**Behavior changes:** `read_output`/`get_layout` now report more output kinds, so an agent reading
+`outputs` sees entries it did not before (additive; existing kinds are unchanged, and `exception`
+is deliberately excluded so a crash is not duplicated into `outputs`). `pills`,
+`segmented_control` and `feedback` move out of `unsupported` and into `widgets`, and are settable.
+An app that only ever displayed a handled exception no longer reports an `exception` field and no
+longer exits non-zero under `--strict`.
+
 ## 0.6.0 (2026-07-18)
 
 Two self-consistency fixes from the nightly dogfood run, both instances of the same theme the
