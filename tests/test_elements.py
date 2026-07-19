@@ -102,3 +102,50 @@ def test_detect_unsupported_empty_for_supported_app():
 def test_serialize_value_handles_lists_and_dates():
     import datetime
     assert serialize_value([datetime.date(2026, 1, 2), "x"]) == ["2026-01-02", "x"]
+
+
+# --- pills / segmented_control / feedback schemas ---
+def _bg_models(script):
+    from streamlit_mcp.elements import tool_schema_for, widgets_to_models
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    out = {}
+    for m in widgets_to_models(rt.snapshot()):
+        m["schema"] = tool_schema_for(m)
+        out[m["identifier"]] = m
+    return out
+
+
+BG_SCRIPT = (
+    "import streamlit as st\n"
+    "st.pills('P1', ['a', 'b'], key='p1')\n"
+    "st.pills('P2', ['x', 'y'], selection_mode='multi', default=['x'], key='p2')\n"
+    "st.segmented_control('S1', ['one', 'two'], default='one', key='s1')\n"
+    "st.feedback('stars', key='fb')\n"
+)
+
+
+def test_single_select_advertises_the_option_and_multi_an_array_of_them():
+    """selection_mode isn't exposed by Streamlit, so the value's shape is the signal — the same one
+    that distinguishes a range widget. The schema has to match what set_widget accepts, or a
+    schema-following agent sends the wrong shape into a silent revert."""
+    m = _bg_models(BG_SCRIPT)
+    assert m["p2"]["schema"]["properties"]["value"]["type"] == "array"
+    assert m["p2"]["schema"]["properties"]["value"]["items"]["enum"] == ["x", "y"]
+    s1 = m["s1"]["schema"]["properties"]["value"]
+    assert s1["enum"] == ["one", "two"] and s1["type"] == "string"  # single: not an array
+
+
+def test_feedback_advertises_its_scale_as_a_bounded_integer():
+    """Advertising the bound is what stops an agent sending a 5 to a 5-star widget — which AppTest
+    stores rather than rejecting."""
+    value = _bg_models(BG_SCRIPT)["fb"]["schema"]["properties"]["value"]
+    assert value["minimum"] == 0 and value["maximum"] == 4
+    assert "integer" in value["type"]  # nullable while nothing is rated yet
+
+
+def test_promoted_kinds_are_no_longer_reported_unsupported():
+    from streamlit_mcp.elements import detect_unsupported_source
+    names = [u["element"] for u in detect_unsupported_source(BG_SCRIPT)]
+    assert names == []

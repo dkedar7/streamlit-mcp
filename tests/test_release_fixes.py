@@ -263,7 +263,10 @@ DROPPED_APP = (
 )
 
 
-def test_promoted_widgets_introspected_and_pills_reported():
+def test_promoted_widgets_introspected_including_pills():
+    """#29's guarantee — no input widget is silently dropped. pills was this test's example of the
+    weaker half of it (undrivable, so reported under `unsupported`); it is now drivable and is
+    introspected like any other widget, which satisfies the same guarantee more strongly."""
     from streamlit_mcp.elements import detect_unsupported_source
     from streamlit_mcp.engine import Engine
     from streamlit_mcp.runtime import AppTestRuntime
@@ -271,8 +274,8 @@ def test_promoted_widgets_introspected_and_pills_reported():
     rt.run()
     kinds = {w["kind"] for w in Engine(rt).list_widgets()["widgets"]}
     assert {"time_input", "toggle", "select_slider", "color_picker"} <= kinds  # no longer dropped
-    # pills isn't drivable -> reported explicitly, never silently dropped
-    assert "pills" in [u["element"] for u in detect_unsupported_source(DROPPED_APP)]
+    assert "pills" in kinds                       # promoted: driven, not merely reported
+    assert "pills" not in [u["element"] for u in detect_unsupported_source(DROPPED_APP)]
 
 
 def test_promoted_widgets_are_drivable():

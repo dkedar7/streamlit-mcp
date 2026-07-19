@@ -12,7 +12,7 @@ import datetime
 import re
 from typing import Any
 
-from .runtime import RuntimeSnapshot, WidgetSnapshot
+from .runtime import BUTTON_GROUP_KINDS, RuntimeSnapshot, WidgetSnapshot
 
 # Widgets that take a value via set_widget vs. the action-only button.
 ACTION_KINDS = ("button",)
@@ -21,6 +21,13 @@ ACTION_KINDS = ("button",)
 # dropped (origin R10 / AE3; completed for the full input-widget set in #29). Kept in sync with
 # Streamlit's "Input widgets" category minus the supported kinds; anything here is surfaced in
 # `unsupported` so an agent/human at least learns it exists.
+#
+# pills / segmented_control / feedback were here until they were found to be drivable after all:
+# AppTest exposes each under its own typed accessor with a working set_value, even though pills and
+# segmented_control share the `button_group` protobuf name in the element tree. They are supported
+# kinds now (see runtime.BUTTON_GROUP_KINDS); what remains below genuinely cannot be driven —
+# file/camera/audio input need a binary upload, data_editor exposes no setter, and
+# download/link/page_link are navigation with no state to set.
 #
 # form_submit_button is deliberately NOT here: AppTest renders it as a `button`-typed node, so the
 # runtime already surfaces it as a supported, clickable widget and clicking it genuinely submits
@@ -38,9 +45,6 @@ UNSUPPORTED_ELEMENTS = (
     "download_button",
     "link_button",
     "page_link",
-    "pills",
-    "segmented_control",
-    "feedback",
 )
 
 # Fallback for source that doesn't parse (see _unsupported_names).
@@ -108,6 +112,15 @@ RANGE_KINDS = ("slider", "select_slider", "date_input")
 
 def is_range_widget(model: dict) -> bool:
     return model["kind"] in RANGE_KINDS and isinstance(model.get("value"), list)
+
+
+def is_multi_choice(model: dict) -> bool:
+    """Whether a pills/segmented_control was built with ``selection_mode='multi'``.
+
+    Streamlit exposes no selection_mode flag, but the value's own shape is a reliable signal — the
+    same one that distinguishes a range widget: a multi-select holds a list (``[]`` when nothing is
+    chosen) where a single-select holds a bare option or ``None``."""
+    return model["kind"] in BUTTON_GROUP_KINDS and isinstance(model.get("value"), list)
 
 
 def _recover_typed(sample: Any, text: str) -> Any:
@@ -199,6 +212,21 @@ def tool_schema_for(model: dict) -> dict:
         value = _choice_value_schema(model, list(c.get("options", [])))
     elif kind == "multiselect":
         value = {"type": "array", "items": _choice_value_schema(model, list(c.get("options", [])))}
+    elif kind in BUTTON_GROUP_KINDS:
+        # Same option semantics as a selectbox/multiselect; which of the two it is depends on the
+        # widget's selection_mode, and the value's shape is the signal for that (see
+        # is_multi_choice) — so a single-select advertises the option itself and a multi-select
+        # advertises an array of them, matching what set_widget will accept.
+        value = _choice_value_schema(model, list(c.get("options", [])))
+        if is_multi_choice(model):
+            value = {"type": "array", "items": value}
+    elif kind == "feedback":
+        # A rating is an index into a fixed scale (thumbs 0-1, faces/stars 0-4). Advertising the
+        # bound is what stops an agent sending a 5 to a 5-star widget — which AppTest stores rather
+        # than rejecting.
+        value = {"type": "integer", "minimum": c.get("min", 0)}
+        if c.get("max") is not None:
+            value["maximum"] = c["max"]
     elif kind in ("checkbox", "toggle"):
         value = {"type": "boolean"}
     elif kind == "date_input":

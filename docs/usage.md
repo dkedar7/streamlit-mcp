@@ -40,9 +40,9 @@ recursing through the sidebar and columns), so the layout an agent reads back ma
 
 Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
 `selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,
-`time_input`, `color_picker`. Input widgets streamlit-mcp can't drive (`file_uploader`,
-`camera_input`, `chat_input`, `pills`, `segmented_control`, `feedback`, …) are reported
-explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
+`time_input`, `color_picker`, `pills`, `segmented_control`, `feedback`. Input widgets
+streamlit-mcp can't drive (`file_uploader`, `camera_input`, `audio_input`, `chat_input`,
+`data_editor`, …) are reported explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
 dropped — wherever they're placed, including `st.sidebar.file_uploader(...)` and inside columns,
 tabs and containers.
 
@@ -81,6 +81,22 @@ tabs and containers.
     hands over options already stringified), so a widget with **nothing selected** — an untouched
     `st.multiselect("Nums", [1, 2, 3])` — advertises the string form alone. That form is always
     settable, so the round-trip still works.
+
+!!! note "Selection widgets (`pills`, `segmented_control`) and `feedback`"
+    A `pills`/`segmented_control` is single- or multi-select depending on its `selection_mode`,
+    and Streamlit exposes no flag for which — the **value's shape** is the signal, as it is for a
+    range widget. A single-select holds a bare option (or `null` before anything is chosen) and
+    advertises the option itself; a multi-select holds a list (`[]` when empty) and advertises an
+    array. Sending a bare option to a multi-select means "select just this one", as with
+    `multiselect`; a multi-select is cleared with `[]`.
+
+    Once a selection is made it **cannot be cleared with `null`** — Streamlit's testing API
+    silently ignores that, so `set_widget(id, null)` is rejected rather than reported as a success
+    that never happened. Select a different option, or send `[]` on a multi-select.
+
+    An `st.feedback` rating is an **index into its scale** — `thumbs` is `0-1`, `faces` and
+    `stars` are `0-4` — and it advertises those bounds. Out-of-range ratings are rejected up front
+    because the testing API neither raises nor reverts them; it stores them.
 
 !!! note "Placeholder (null) widgets"
     A widget built with `value=None` / `index=None` — a `text_input`/`text_area`/`number_input`/
