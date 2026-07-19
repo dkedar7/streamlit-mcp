@@ -1,6 +1,50 @@
 # Changelog
 
-## 0.5.1 (2026-07-16)
+## 0.6.0 (2026-07-18)
+
+Two self-consistency fixes from the nightly dogfood run, both instances of the same theme the
+0.5.x line has been working through: **the tool must not contradict itself across its own
+surfaces**. Also carries the 0.5.1 fix below, which was never published separately.
+
+- **Fix:** a widget built from **non-string options** (`st.selectbox("Year", [2023, 2024, 2025])`)
+  no longer reports a `value` that violates the `schema` the same call advertises (#62). It read
+  back `value: 2023` (int) against `{"type": "string", "enum": ["2023","2024","2025"]}` — a value
+  that is neither a member of nor the type of its own schema, so a schema-validating agent balked
+  at output the tool itself emitted. #51 fixed only the *write* path (`set_widget` matches on
+  string form); the advertised model stayed self-inconsistent. The `enum` now carries **both**
+  forms — `[2023, 2024, 2025, "2023", "2024", "2025"]` — so the reported value is always a member,
+  and **any** option can be set in either form, not just the one currently selected.
+
+    Streamlit hands over options already stringified, so the current value's type is the only
+    evidence of the real option type available at runtime. It's used to recover every option's
+    typed form, guarded by a round-trip check so a typed member always denotes the option it came
+    from: a mixed list (`[1, "two", 3.0]`) keeps the unrecoverable options in string form, and
+    `bool` gets its own mapping (`bool("False")` is `True`). A widget with **nothing selected**
+    (an untouched `st.multiselect("Nums", [1,2,3])`) offers no such evidence and keeps the string
+    form — still correct and settable, just less informative.
+
+- **Fix:** a command's `--json` form now carries the app-level `exception` its own **text** form
+  prints (#64). 0.5.0 (#58) made all four text CLI forms report a crashed app, but bare
+  `inspect --json` and `call --state --json` still dropped it — so within the *same command* the
+  human saw `exception: boom` and a script doing `inspect --json | jq .exception` got `null`.
+  Those two payloads come from `list_widgets`/`get_state`, which legitimately don't carry the
+  field (they mirror MCP tools that don't), while `get_layout`/`read_output` do. The value is now
+  injected once per command wherever it's missing, rather than being plumbed surface by surface —
+  the pattern that let this family (#27 → #58 → #64) keep re-opening. The **MCP contract is
+  unchanged**; this is a CLI text↔`--json` parity fix, and it closes a gap against the documented
+  guarantee that the exception is surfaced on every read surface.
+
+**Behavior changes:** a non-string-option `selectbox`/`radio`/`select_slider`/`multiselect` now
+advertises a mixed-type `enum` (both the typed and string form of each option) and no longer
+carries `"type": "string"`, since a mixed enum has no single JSON-Schema type; pure-string-option
+widgets are untouched. `inspect --json` and `call --state --json` gain an `"exception"` field when
+the served app raised — a healthy app's payload is byte-identical to before. No previously-correct
+set stops working.
+
+Thanks to [@Sanjays2402](https://github.com/Sanjays2402) for #63, which found and fixed the
+non-string-option schema inconsistency.
+
+## 0.5.1 (2026-07-16 — never published separately; shipped in 0.6.0)
 
 Completes the null-placeholder fix from 0.5.0 (#57), which covered only `selectbox`/`radio` and
 left the other widgets that legitimately hold `value: None` broken the same way (#60). The whole
