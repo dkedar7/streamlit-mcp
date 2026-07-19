@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.1 (2026-07-19)
+
+Documentation fix. `README.md` is the PyPI long description, so this correction is the point of
+the release — the text was wrong on the project page.
+
+- **Fix:** the README listed `st.pills`, `st.segmented_control` and `st.feedback` as supported
+  and, six lines further down, among the input widgets streamlit-mcp **"can't drive"** (#72). The
+  0.7.0 promotion updated the same sentence in `docs/usage.md` and missed the README's, so a
+  reader going top-to-bottom hit a direct contradiction on a headline 0.7.0 capability — and the
+  second claim was simply false. The undrivable list now reads `file_uploader`, `camera_input`,
+  `audio_input`, `chat_input`, `data_editor`, which matches what the code reports.
+
+- **Internal:** CI now guards the two classes the nightly dogfood routine keeps finding first.
+  The routine installs the published package clean-room and follows the docs verbatim, so it is a
+  doc-conformance tester by construction and every doc/behaviour gap is a guaranteed find. The
+  docs' widget lists are now asserted against `SUPPORTED_KINDS`/`UNSUPPORTED_ELEMENTS` (in *both*
+  docs — checking only one is how #72 escaped), and text↔`--json` surface parity is asserted
+  across the whole command matrix rather than one surface at a time, which is what let #1 → #58 →
+  #64 keep re-opening.
+
 ## 0.7.0 (2026-07-19)
 
 Widens what an agent can **see** and **drive**, plus one crash-reporting false positive. The
