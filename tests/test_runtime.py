@@ -201,3 +201,44 @@ def test_an_uncaught_crash_is_not_duplicated_into_outputs():
     assert snap.exception is not None and "boom" in snap.exception
     assert all(o.kind != "exception" for o in snap.outputs)
     assert any(o.kind == "success" for o in snap.outputs)  # prior outputs still reported
+# --- #69: a deliberate st.exception(e) is not an app crash ---
+def _exc(script):
+    rt = AppTestRuntime(script=script)
+    rt.run()
+    return rt.snapshot().exception
+
+
+def test_deliberate_st_exception_is_not_reported_as_a_crash():
+    """st.exception(e) is the documented way to SHOW a handled error. Reporting it as a crash made
+    an app that handles errors correctly look broken, and --strict failed CI for it (#69)."""
+    assert _exc(
+        "import streamlit as st\n"
+        "try:\n"
+        "    1 / 0\n"
+        "except ZeroDivisionError as e:\n"
+        "    st.exception(e)\n"
+        "st.info('pick another file')\n"
+    ) is None
+
+
+def test_an_uncaught_crash_is_still_reported():
+    """The guarantee #27/#58/#64 exist to give must not regress."""
+    assert "boom" in _exc("import streamlit as st\nst.success('x')\nraise ValueError('boom')\n")
+
+
+@pytest.mark.parametrize("script,where", [
+    ("import streamlit as st\nraise ValueError('boom')\n", "first line, nothing rendered"),
+    ("import streamlit as st\nwith st.sidebar:\n    raise ValueError('boom')\n", "inside sidebar"),
+    ("import streamlit as st\nwith st.expander('e'):\n    raise ValueError('boom')\n", "in expander"),
+])
+def test_a_crash_is_reported_wherever_it_happens(script, where):
+    """Streamlit renders an uncaught exception last even when it is raised inside a sidebar or an
+    expander, which is what makes the position signal sound."""
+    assert "boom" in (_exc(script) or ""), where
+
+
+def test_a_deliberate_exception_as_the_final_statement_still_reports():
+    """The residual ambiguity, asserted so it stays a deliberate choice rather than drifting: with
+    nothing rendered after it, a deliberate st.exception(e) is indistinguishable from a crash, and
+    the tie is broken toward reporting — missing a real crash is far worse than over-reporting."""
+    assert _exc("import streamlit as st\nst.exception(ValueError('shown'))\n") == "shown"
