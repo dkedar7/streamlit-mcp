@@ -65,7 +65,35 @@ BUTTON_GROUP_KINDS = ("pills", "segmented_control")
 _FEEDBACK_OPTION_COUNTS = {"THUMBS": 2, "FACES": 5, "STARS": 5}
 
 # Output element kinds we render to agent-readable text.
-OUTPUT_KINDS = ("title", "header", "subheader", "markdown", "caption", "text")
+#
+# The prose kinds alone left an agent unable to see the two things an app most often says back to
+# it. The STATUS kinds are the load-bearing ones: an agent that sets a field and clicks submit had
+# no way to tell whether the app answered st.success("Saved") or st.error("Invalid date") — the
+# outcome of its own action was invisible, so it could only re-read widget values and guess. The
+# DATA kinds carry the results an app reports through (a metric on a dashboard, a table of rows,
+# a JSON payload) rather than through markdown.
+#
+# `exception` is deliberately NOT here. An *uncaught* crash renders as an `exception` element too,
+# indistinguishable from a deliberate st.exception(e), so including it would duplicate the crash
+# into `outputs` — and the crash already has its own dedicated surface, the snapshot's `exception`
+# field (#27/#58/#64). One surface per fact.
+OUTPUT_KINDS = (
+    # prose
+    "title", "header", "subheader", "markdown", "caption", "text",
+    # status — what the app says about what just happened
+    "success", "error", "warning", "info",
+    # data — results reported as something other than prose
+    "metric", "code", "json", "dataframe", "table",
+)
+
+# An output's text becomes agent context, and some kinds are unbounded: st.json serializes a whole
+# structure (a 2000-element list is ~11 KB), where a DataFrame self-truncates through pandas. Cap
+# what any single element contributes so one big output can't crowd out the rest of the app.
+MAX_OUTPUT_CHARS = 2000
+
+# The two container nodes _walk yields before their children. They bracket the tree rather than
+# being content in it, so they never count as the last rendered element (see _exception).
+_ROOT_BLOCKS = ("sidebar", "main")
 
 
 def _display(value: Any) -> str:
@@ -242,15 +270,44 @@ class AppTestRuntime:
         for el in self._walk():
             kind = getattr(el, "type", None)
             if kind in output_kinds:
-                val = getattr(el, "value", None)
-                if val is not None:
-                    outputs.append(OutputSnapshot(kind=kind, text=str(val)))
+                text = self._output_text(kind, el)
+                if text is not None:
+                    outputs.append(OutputSnapshot(kind=kind, text=text))
         return RuntimeSnapshot(
             widgets=widgets,
             outputs=outputs,
             session_state=self._session_state(),
             exception=self._exception(),
         )
+
+    @classmethod
+    def _output_text(cls, kind: str, el) -> Optional[str]:
+        """One output element as the line an agent reads, or None to skip it.
+
+        A `metric` needs assembling rather than stringifying: its `value` is the bare number
+        ("1234"), so rendering it like the prose kinds would drop the label and delta that give it
+        meaning — a dashboard of four metrics would read as four anonymous numbers."""
+        try:
+            value = getattr(el, "value", None)
+        except Exception:
+            # AppTest raises rather than returning None for some elements' `value` (a link_button
+            # whose state was never registered raises KeyError). An unreadable output is skipped,
+            # never fatal to the whole snapshot.
+            return None
+        if value is None:
+            return None
+        if kind == "metric":
+            label = getattr(el, "label", None)
+            delta = getattr(el, "delta", None)
+            text = f"{label}: {value}" if label else str(value)
+            return f"{text} ({delta})" if delta else text
+        return cls._truncate(str(value))
+
+    @staticmethod
+    def _truncate(text: str) -> str:
+        if len(text) <= MAX_OUTPUT_CHARS:
+            return text
+        return text[:MAX_OUTPUT_CHARS] + f"… [truncated, {len(text)} chars total]"
 
     def _session_state(self) -> dict:
         ss = self.at.session_state
@@ -264,10 +321,41 @@ class AppTestRuntime:
             return {}
 
     def _exception(self) -> Optional[str]:
+        """The app's *uncaught* exception, if it crashed — not every exception it displays.
+
+        Streamlit renders a deliberate ``st.exception(e)`` and an uncaught crash as the SAME
+        element kind, and its testing API exposes no flag separating them: there is no
+        SCRIPT_STOPPED_WITH_EXCEPTION event (an uncaught runtime error still reports
+        SCRIPT_STOPPED_WITH_SUCCESS — only *compile* errors get their own event), and
+        ``stack_trace`` doesn't discriminate either, since ``st.exception(e)`` on a *caught*
+        exception carries a real traceback identical in shape to a crash's. So reading every
+        exception element reported an app that merely handled an error as having crashed, and
+        ``--strict`` failed CI for a healthy app (#69).
+
+        The one sound signal is position: an uncaught exception HALTS the script, so nothing can
+        render after it. Anything following an exception element therefore proves the script kept
+        running and that exception was deliberate. This holds even for awkward placements — a crash
+        inside ``with st.sidebar:`` or inside an expander still renders its exception element last.
+
+        The converse does not hold: a deliberate ``st.exception(e)`` as the app's final statement
+        is genuinely indistinguishable from a crash, and that case keeps reporting. Missing a real
+        crash would break the guarantee #27/#58/#64 exist to give, where over-reporting is only
+        noisy — so the ambiguity is resolved toward reporting, deliberately.
+        """
         exc = getattr(self.at, "exception", None)
         if not exc:
             return None
-        try:
+        last = None
+        for el in self._walk():
+            # The roots themselves are yielded before their children, so they never stand as the
+            # final element — skipping them keeps an empty sidebar from masking a real crash.
+            if getattr(el, "type", None) not in _ROOT_BLOCKS:
+                last = el
+        if last is not None and getattr(last, "type", None) != "exception":
+            return None  # the script ran past every exception it rendered — all deliberate
+        if last is not None:
+            return str(getattr(last, "value", last))
+        try:  # nothing rendered at all; report whatever the run surfaced
             return "; ".join(str(getattr(e, "value", e)) for e in exc)
         except TypeError:
             return str(exc)
