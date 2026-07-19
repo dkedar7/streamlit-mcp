@@ -49,17 +49,24 @@ def test_docs_list_exactly_the_supported_widget_kinds(path):
     assert _listed_after(path, "Supported widgets:") == set(SUPPORTED_KINDS)
 
 
-def test_docs_never_call_a_supported_widget_undrivable():
+@pytest.mark.parametrize("path", [README, USAGE], ids=["README", "docs/usage.md"])
+def test_docs_never_call_a_supported_widget_undrivable(path):
     """The drift direction that actually misleads: a widget we drive still listed as one we can't.
-    `pills` sat in this sentence while being drivable until 0.7.0."""
-    named = _listed_after(USAGE, "can't drive", stop=")")
-    assert named, "the 'can't drive' example list vanished — update this test"
+
+    Parametrized over BOTH docs because that is exactly how this escaped. The 0.7.0 promotion
+    updated `docs/usage.md`'s "can't drive" sentence and missed the README's, so the shipped README
+    listed pills/segmented_control/feedback as supported AND unsupported six lines apart — and the
+    first version of this guard only checked usage.md, so it would have missed it too. The routine
+    filed it as #72 the next morning. Any doc that names undrivable widgets is checked now.
+    """
+    named = _listed_after(path, "can't drive", stop=")")
+    assert named, f"the 'can't drive' example list vanished from {path.name} — update this test"
     assert not (named & set(SUPPORTED_KINDS)), (
-        f"docs/usage.md calls {sorted(named & set(SUPPORTED_KINDS))} undrivable, but they are in "
-        f"SUPPORTED_KINDS"
+        f"{path.name} calls {sorted(named & set(SUPPORTED_KINDS))} undrivable, but they are in "
+        f"SUPPORTED_KINDS — the same contradiction the routine filed as #72"
     )
     assert named <= set(UNSUPPORTED_ELEMENTS), (
-        f"docs/usage.md names {sorted(named - set(UNSUPPORTED_ELEMENTS))} as undrivable, but they "
+        f"{path.name} names {sorted(named - set(UNSUPPORTED_ELEMENTS))} as undrivable, but they "
         f"are not in UNSUPPORTED_ELEMENTS either — the list is stale"
     )
 
