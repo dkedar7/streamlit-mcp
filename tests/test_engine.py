@@ -127,3 +127,31 @@ def test_read_only_and_no_guard_do_not_filter_state():
     assert "secret" in Engine(rt).get_state()  # no guard -> full state
     # read-only governs writes, not reads: it must not hide any state
     assert "secret" in Engine(rt, guard=Guardrails(read_only=True)).get_state()
+
+
+def test_list_widgets_reports_app_exception():
+    app = str(Path(__file__).parent / "apps" / "raises_app.py")
+    rt = AppTestRuntime(app)
+    rt.run()
+
+    result = Engine(rt).list_widgets()
+
+    assert "boom" in result["exception"]
+
+
+def test_get_state_reports_app_exception():
+    rt = AppTestRuntime(script="raise RuntimeError('boom')\n")
+    rt.run()
+
+    result = Engine(rt).get_state()
+
+    assert "boom" in result["exception"]
+
+
+def test_get_state_preserves_session_exception_key():
+    rt = AppTestRuntime(
+        script="import streamlit as st\nst.session_state['exception'] = 'app value'\nraise RuntimeError('boom')\n"
+    )
+    rt.run()
+
+    assert Engine(rt).get_state()["exception"] == "app value"

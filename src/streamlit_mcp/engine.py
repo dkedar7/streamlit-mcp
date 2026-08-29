@@ -46,10 +46,11 @@ class Engine:
 
     # --------------------------------------------------------------- reads
     def list_widgets(self) -> dict:
-        models = self._visible_widgets()
+        snap = self.rt.snapshot()
+        models = self._visible_widgets(snap)
         for m in models:
             m["schema"] = tool_schema_for(m)
-        return {"widgets": models}
+        return self._with_exception({"widgets": models}, snap.exception)
 
     def get_layout(self) -> dict:
         snap = self.rt.snapshot()
@@ -73,7 +74,14 @@ class Engine:
         }
 
     def get_state(self) -> dict:
-        return self._visible_state(self.rt.snapshot())
+        snap = self.rt.snapshot()
+        return self._with_exception(self._visible_state(snap), snap.exception)
+
+    @staticmethod
+    def _with_exception(payload: dict, exception: Optional[str]) -> dict:
+        if exception is not None and "exception" not in payload:
+            return {**payload, "exception": exception}
+        return payload
 
     # --------------------------------------------------------------- writes
     def set_widget(self, identifier: str, value: Any) -> dict:
