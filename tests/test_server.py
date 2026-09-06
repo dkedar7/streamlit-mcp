@@ -92,3 +92,10 @@ def test_build_server_smoke():
     from fastmcp import FastMCP
     mcp = build_server(APP)
     assert isinstance(mcp, FastMCP)
+
+
+def test_load_app_semantic_tools_rejects_missing_app():
+    from streamlit_mcp.server import _load_app_semantic_tools
+
+    with pytest.raises(ValueError, match="AppTest script not found"):
+        _load_app_semantic_tools("does_not_exist_xyz.py")

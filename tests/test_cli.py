@@ -163,3 +163,14 @@ def test_inspect_missing_file_json_clean_error(capsys):
     rc = _run(["inspect", "does_not_exist_xyz.py", "--json"])
     assert rc == 1
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_serve_missing_file_fails_cleanly(capsys, monkeypatch):
+    from streamlit_mcp import server
+
+    monkeypatch.setattr(server.FastMCP, "run", lambda *args, **kwargs: None)
+    rc = _run(["serve", "does_not_exist_xyz.py"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "AppTest script not found" in err
+    assert "Traceback" not in err

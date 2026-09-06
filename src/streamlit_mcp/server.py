@@ -186,6 +186,8 @@ def _load_app_semantic_tools(app_path: str) -> None:
     so don't block serve startup here. (Re-registration on later session runs is idempotent.)"""
     try:
         AppTestRuntime(app_path).run()
+    except FileNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
     except Exception:
         pass
 
