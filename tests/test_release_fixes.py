@@ -755,6 +755,59 @@ def test_int_number_input_rejects_a_fractional_value():
     assert rt.snapshot().session_state["score"] == 30
 
 
+@pytest.mark.parametrize("args", [
+    "min_value=0.0, max_value=100.0, value=10.0",
+    "value=10.0",
+    "value=None",
+    "min_value=0, max_value=100, value=10",
+])
+@pytest.mark.parametrize("value", ["nan", "NaN", float("nan"), "inf", "-inf"])
+def test_number_input_rejects_nonfinite_values_atomically(args, value):
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script="import streamlit as st\n"
+                               f"st.number_input('Price', {args}, key='price')\n")
+    rt.run()
+    rt.set_widget("price", 50)
+    with pytest.raises(RuntimeError_, match="finite|out of range"):
+        rt.set_widget("price", value)
+    assert rt.snapshot().session_state["price"] == 50
+    rt.set_widget("price", 60)
+    assert rt.snapshot().session_state["price"] == 60
+
+
+def test_number_input_nan_cli_returns_failure(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "price.py"
+    app.write_text("import streamlit as st\n"
+                   "st.number_input('Price', 0.0, 100.0, 10.0, key='price')\n")
+    assert main(["call", str(app), "--set", "Price=50", "--set", "Price=nan",
+                 "--state", "--json"]) != 0
+    assert "finite" in capsys.readouterr().err
+
+
+def test_number_input_nan_mcp_rejects_and_preserves_session(tmp_path):
+    import asyncio
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError
+    from streamlit_mcp.server import build_server
+    app = tmp_path / "price.py"
+    app.write_text("import streamlit as st\n"
+                   "st.number_input('Price', 0.0, 100.0, 10.0, key='price')\n")
+
+    async def run():
+        async with Client(build_server(str(app))) as client:
+            await client.call_tool("set_widget", {"identifier": "price", "value": 50})
+            with pytest.raises(ToolError, match="finite"):
+                await client.call_tool("set_widget", {"identifier": "price", "value": "nan"})
+            state = await client.call_tool("get_state", {})
+            assert state.data["price"] == 50
+            await client.call_tool("set_widget", {"identifier": "price", "value": 60})
+            state = await client.call_tool("get_state", {})
+            assert state.data["price"] == 60
+
+    asyncio.run(run())
+
+
 # --- 0.4.0 #52: an unsupported widget placed via a container accessor is reported, not dropped ---
 ACCESSOR_APP = (
     "import streamlit as st\n"
