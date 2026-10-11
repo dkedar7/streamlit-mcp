@@ -63,7 +63,8 @@ tabs and containers.
     (including every handle of a two-handle `select_slider` range), a
     `number_input`/`slider`/`date_input` outside its `min`/`max` (including either end of a
     two-date range), a value of the wrong **arity** (a single value for a two-handle range widget,
-    or a list for a single-handle one), a **fractional** value for an integer `number_input`, or a
+    or a list for a single-handle one), a **fractional** value for an integer `number_input`,
+    a non-finite `number_input` value such as `nan` or `inf`, or a
     `color_picker` to anything but a `#RGB`/`#RRGGBB` hex string, is rejected **before** any state
     changes — with a clear error listing the valid choices/range/format. An unparseable number,
     date, or time value is likewise rejected with a clear message. A failed `set_widget` leaves the

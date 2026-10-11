@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Reject non-finite `number_input` values before updating the widget, preserving its
+  previous value and reporting an error on both the CLI and MCP surfaces (#158).
+
 ## 0.7.1 (2026-07-19)
 
 Documentation fix. `README.md` is the PyPI long description, so this correction is the point of

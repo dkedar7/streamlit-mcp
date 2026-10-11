@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -598,12 +599,17 @@ class AppTestRuntime:
 
     @staticmethod
     def _validate_number(kind: str, identifier: str, el, value: Any) -> None:
-        """Reject a fractional value for an *integer* number_input before it is written. AppTest
+        """Reject non-finite numbers and fractional values for an integer number_input. AppTest
         truncates it (30.5 -> 30) without raising, so set_widget stored a value the caller never
         asked for and reported success — the silent-corruption sibling of #12/#55, noted while
         fixing #51. An integral float (30.0) is lossless, so it passes."""
         if kind != "number_input":
             return
+        if isinstance(value, float) and not math.isfinite(value):
+            raise RuntimeError_(
+                f"{value!r} is not a valid value for number_input {identifier!r}; "
+                "send a finite number"
+            )
         current = getattr(el, "value", None)
         # bool is an int subclass; a float number_input takes fractional values fine.
         if isinstance(current, bool) or not isinstance(current, int):
