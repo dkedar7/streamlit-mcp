@@ -199,9 +199,22 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(_with_exception(out, exception), indent=2, default=str))
         return _report_exception(exception, args)
-    for w in out["widgets"]:
-        flag = " [action]" if w.get("action") else ""
-        print(f"  {w['kind']:<13} {w['identifier']:<14} = {w['value']!r}{flag}")
+    if out["widgets"]:
+        for w in out["widgets"]:
+            flag = " [action]" if w.get("action") else ""
+            print(f"  {w['kind']:<13} {w['identifier']:<14} = {w['value']!r}{flag}")
+    else:
+        # #150: an empty widget list used to render as silence — 0 bytes at exit 0 on the
+        # README quickstart's first command, indistinguishable from a hang or a wrong file —
+        # while --json signalled it structurally ({"widgets": []}) and --layout printed the
+        # outputs + `unsupported:` section explaining why nothing is drivable. Say the empty
+        # state in words, and point at the surface that explains it. The --json branch above
+        # returns before here, so the payload is untouched.
+        if args.layout:
+            print("  No supported widgets found.")
+        else:
+            print("  No supported widgets found"
+                  " (run with --layout to see outputs and unsupported elements).")
     if args.layout:
         for o in out.get("outputs", []):
             print(f"  [{o['kind']}] {o['text']}")

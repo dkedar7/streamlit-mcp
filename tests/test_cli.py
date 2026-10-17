@@ -13,6 +13,7 @@ from streamlit_mcp.decorator import clear_registry
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
 SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
 RAISES_APP = str(Path(__file__).parent / "apps" / "raises_app.py")
+CHAT_APP = str(Path(__file__).parent / "apps" / "chat_app.py")
 
 
 @pytest.fixture(autouse=True)
@@ -163,3 +164,48 @@ def test_inspect_missing_file_json_clean_error(capsys):
     rc = _run(["inspect", "does_not_exist_xyz.py", "--json"])
     assert rc == 1
     assert "Traceback" not in capsys.readouterr().err
+
+
+# --- #150: default `inspect` on an app with no supported widgets must not print nothing ---
+def test_inspect_empty_state_printed_for_chat_app(capsys):
+    """The README quickstart's first command printed 0 bytes at exit 0 for a chat app —
+    indistinguishable from a hang or a crash — while --json and --layout both reported
+    the state. The text view must say the empty state in words."""
+    assert _run(["inspect", CHAT_APP]) == 0
+    out = capsys.readouterr().out
+    assert out.strip(), "bare inspect printed nothing (0 bytes) for a widget-less app (#150)"
+    assert "No supported widgets" in out
+    assert "--layout" in out  # the empty state points at the surface that explains why
+
+
+def test_inspect_empty_state_printed_for_widgetless_app(tmp_path, capsys):
+    # the other class from the report: an app with no input widgets at all
+    app = tmp_path / "empty.py"
+    app.write_text("import streamlit as st\nst.title('Empty')\nst.write('nothing to drive')\n")
+    assert _run(["inspect", str(app)]) == 0
+    out = capsys.readouterr().out
+    assert out.strip(), "bare inspect printed nothing for an app with no widgets (#150)"
+    assert "No supported widgets" in out
+
+
+def test_inspect_json_empty_widgets_stays_structural(capsys):
+    # --json already signalled the empty state structurally; the text fix must not leak into it
+    assert _run(["inspect", CHAT_APP, "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)     # still clean, parseable JSON
+    assert payload["widgets"] == []
+
+
+def test_inspect_layout_still_reports_state_for_chat_app(capsys):
+    # --layout already reported the state (outputs + unsupported); it must keep doing so
+    assert _run(["inspect", CHAT_APP, "--layout"]) == 0
+    out = capsys.readouterr().out
+    assert "[title] Chat Assistant" in out
+    assert "unsupported:" in out and "chat_input" in out
+
+
+def test_inspect_empty_state_absent_when_widgets_exist(capsys):
+    # the empty-state line must not leak into the normal path
+    assert _run(["inspect", APP]) == 0
+    out = capsys.readouterr().out
+    assert "No supported widgets" not in out
+    assert "text_input" in out
