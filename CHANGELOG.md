@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.8.0 (2026-10-31)
+
+The newest nightly-dogfood findings. Most of them are one bug found five times: a numeric widget
+accepted a value it can't hold and reported success. Rather than patch each report, number_input
+and slider now go through **one** write guard, and integer-ness comes from the widget's declared
+type instead of being guessed from its current value.
+
+- **Fix:** a numeric `number_input` / `slider` (every handle of a range, too) now rejects, up
+  front and with the prior value intact:
+    - a **boolean** — `bool` is an `int` subclass, so `true` was stored as `1` while `"maybe"` was
+      rejected (#164 number_input, #169 slider);
+    - **NaN / ±inf** — NaN fails every comparison, so it passed the bounds check and AppTest reset
+      the widget to its *default*, wiping a prior valid value at `isError=False` (#158);
+    - a **fractional value on an integer widget** — including an empty `value=None` integer
+      input, which the old guard skipped because it had no current value to inspect (#161), and
+      an integer `slider`, which had no guard at all (#79).
+
+    A slider set from a string (`--set vol=55`) is now converted like a number_input, so
+    `vol=maybe` gets a clean message instead of a leaked `could not convert string to float`.
+
+- **Fix:** an integer `number_input`/`slider` advertises `{"type": "integer"}` with integer
+  bounds, not `{"type": "number", "minimum": 0.0}` — a schema that invited the very fractional
+  value it then rejects (#98). `constraints` carries `"integer": true` for these widgets.
+
+- **New:** every widget model carries **`disabled`** (#160). A disabled widget rejects writes
+  just as it does for a browser user; an agent can now see that before spending a call on it.
+
+- **Fix:** a `st.metric` delta now carries its **colour's verdict** — `Error rate: 5% (+2%, bad)`
+  vs `Revenue: $4,210 (+8%, good)` (#174). The sign alone doesn't say it: `delta_color="inverse"`
+  paints a rising error rate red, and the two used to read byte-identically. A neutral
+  (`delta_color="off"`) delta adds nothing.
+
+- **New:** **`st.toast`** text is captured as a `toast` output (#170) — usually the app's answer
+  to the action an agent just took ("Saved!"). It is reported after the document-order outputs,
+  since a toast floats over the page rather than sitting at a position in it.
+
+- **Fix:** CLI `call` parses each `--set` against the app *as it stands at that point*, so a
+  widget revealed by an earlier `--set` (a "show advanced" checkbox) gets the #43/#54 handling:
+  `comment=true` stays `"true"` rather than becoming `'True'`, and a revealed `["true","false"]`
+  selectbox accepts its own options (#172).
+
+- **Fix:** the MCP `initialize` handshake reports streamlit-mcp's version, not FastMCP's (#84);
+  `--version` also names the installed Streamlit, which governs AppTest's behaviour (#167, part).
+
+- **Docs:** the README's "known limitations" no longer calls `st.write`/`st.error` capture
+  "planned" — it shipped in 0.7.0 (#75).
+
+**Behavior changes:** integer widgets' schemas say `integer` (a schema-validating client now
+rejects `30.5` client-side, which the server already rejected). Widget models gain a `disabled`
+key. Metric text gains `, good`/`, bad` when the delta is coloured. `outputs` may contain `toast`
+entries. Writes that used to "succeed" with a boolean, NaN or a truncated fraction now fail.
+
 ## 0.7.1 (2026-07-19)
 
 Documentation fix. `README.md` is the PyPI long description, so this correction is the point of

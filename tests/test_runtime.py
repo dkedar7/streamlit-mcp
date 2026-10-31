@@ -281,7 +281,7 @@ def test_metric_keeps_its_label_and_delta():
     a dashboard of metrics as a column of anonymous numbers."""
     rt = AppTestRuntime(script=STATUS_APP)
     rt.run()
-    assert _outputs(rt)["metric"] == "Total: $4,210 (+8%)"
+    assert _outputs(rt)["metric"] == "Total: $4,210 (+8%, good)"
 
 
 def test_metric_without_a_delta_omits_the_parenthetical():

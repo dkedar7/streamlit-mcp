@@ -922,10 +922,10 @@ def test_range_widget_advertises_an_array_schema():
     for ident in ("rng", "ssr", "dr"):
         assert schemas[ident]["type"] == "array", ident
         assert schemas[ident]["minItems"] == schemas[ident]["maxItems"] == 2, ident
-    assert schemas["rng"]["items"]["type"] == "number"
+    assert schemas["rng"]["items"]["type"] == "integer"  # an int range slider (#98)
     assert schemas["ssr"]["items"]["enum"] == ["s", "m", "l", "xl"]
     assert schemas["dr"]["items"]["format"] == "date"
-    assert schemas["single"]["type"] == "number"  # the single-handle form is unchanged
+    assert schemas["single"]["type"] == "integer"  # the single-handle form is a scalar (int: #98)
 
 
 @pytest.mark.parametrize("identifier,scalar", [

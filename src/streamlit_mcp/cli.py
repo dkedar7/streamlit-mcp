@@ -244,13 +244,16 @@ def cmd_call(args: argparse.Namespace) -> int:
         return 0
     try:
         eng = _engine(args)
-        targets = _set_targets(eng)
         for item in args.set or []:
             if "=" not in item:
                 raise ValueError(f"--set expects 'identifier=value', got {item!r}")
             ident, raw = item.split("=", 1)
             ident = ident.strip()
-            eng.set_widget(ident, _resolve_value(targets.get(ident), raw))
+            # Resolved against the app as it stands NOW, not as it started: an earlier --set can
+            # reveal a widget (a "show advanced" checkbox, a wizard step), and a target table
+            # snapshotted once up front didn't contain it — so its value fell back to the bare
+            # JSON parse and `comment=true` was stored as 'True' (#172, the #43/#54 class).
+            eng.set_widget(ident, _resolve_value(_set_targets(eng).get(ident), raw))
         for ident in args.click or []:
             eng.click(ident)
         result = eng.get_state() if args.state else eng.read_output()
@@ -275,6 +278,16 @@ def cmd_call(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------- parser
+def _version_string() -> str:
+    """Ours plus the installed Streamlit's: Streamlit's version governs AppTest's behaviour (the
+    st.form change in #151 arrived with a Streamlit upgrade), so a bug report needs both (#167)."""
+    try:
+        from importlib.metadata import version
+        return f"streamlit-mcp {__version__} (streamlit {version('streamlit')})"
+    except Exception:
+        return f"streamlit-mcp {__version__}"
+
+
 def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
     p.add_argument("--read-only", dest="read_only", action="store_true",
                    help="block state-changing actions")
@@ -290,8 +303,7 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="streamlit-mcp",
                                      description="Serve a Streamlit app as an MCP server.")
-    parser.add_argument("--version", action="version",
-                        version=f"streamlit-mcp {__version__}")
+    parser.add_argument("--version", action="version", version=_version_string())
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_serve = sub.add_parser("serve", help="serve an app over MCP")
