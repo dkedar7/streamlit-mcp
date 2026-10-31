@@ -79,6 +79,8 @@ def _constraints(w: WidgetSnapshot) -> dict:
         val = getattr(w, name)
         if val is not None:
             c[name] = serialize_value(val)
+    if w.data_type == "INT":
+        c["integer"] = True  # the proto's declared type, not the current value's (see #161)
     return c
 
 
@@ -92,6 +94,9 @@ def widget_to_model(w: WidgetSnapshot) -> dict:
         "constraints": _constraints(w),
         "action": w.kind in ACTION_KINDS,
         "supported": True,
+        # A disabled widget rejects every write, as it does for a browser user — advertised so an
+        # agent can tell "locked right now" from "my value is wrong" without spending a call (#160).
+        "disabled": w.disabled,
     }
 
 
@@ -203,7 +208,10 @@ def tool_schema_for(model: dict) -> dict:
     if kind in ("text_input", "text_area"):
         value = {"type": "string"}
     elif kind in ("number_input", "slider"):
-        value = {"type": "number"}
+        # An integer widget truncates a fractional value, and set_widget rejects one (#51/#79) —
+        # so it must advertise "integer", or a schema-following agent constructs 30.5 by
+        # construction and is refused (#98).
+        value = {"type": "integer" if c.get("integer") else "number"}
         if "min" in c:
             value["minimum"] = c["min"]
         if "max" in c:

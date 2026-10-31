@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -81,7 +82,7 @@ OUTPUT_KINDS = (
     # prose
     "title", "header", "subheader", "markdown", "caption", "text",
     # status — what the app says about what just happened
-    "success", "error", "warning", "info",
+    "success", "error", "warning", "info", "toast",
     # data — results reported as something other than prose
     "metric", "code", "json", "dataframe", "table",
 )
@@ -125,6 +126,10 @@ class WidgetSnapshot:
     min: Any = None
     max: Any = None
     step: Any = None
+    # The widget's numeric data type ("INT"/"FLOAT", or a slider's "DATE"/"TIME"/"DATETIME"), read
+    # off its proto — None for kinds that carry none. See AppTestRuntime._data_type.
+    data_type: Optional[str] = None
+    disabled: bool = False
 
 
 @dataclass
@@ -247,6 +252,33 @@ class AppTestRuntime:
         count = _FEEDBACK_OPTION_COUNTS.get(name)
         return count - 1 if count else None
 
+    @staticmethod
+    def _data_type(el) -> Optional[str]:
+        """A number_input/slider's declared data type, by enum NAME ("INT", "FLOAT", and for a
+        slider "DATE"/"TIME"/"DATETIME"); None when the element has none.
+
+        This is the one source of truth for "is this an integer widget". It used to be inferred
+        from the *current value's* Python type, which is absent exactly when it matters: an empty
+        ``value=None`` integer input has no value to inspect, so the fractional-truncation guard
+        bailed and 30.5 was stored as 30 (#161). The proto carries the type regardless of value —
+        and it's also what lets an integer widget advertise ``integer`` rather than ``number`` (#98)."""
+        proto = getattr(el, "proto", None)
+        try:
+            field = proto.DESCRIPTOR.fields_by_name["data_type"]
+            return field.enum_type.values_by_number[proto.data_type].name
+        except Exception:
+            return None
+
+    @classmethod
+    def _numeric_bound(cls, el, name: str) -> Any:
+        """min/max/step as the widget's own type. AppTest reports them as floats even for an
+        integer widget (``min=0.0`` on ``st.number_input('Age', 0, 120)``), so an integer widget
+        advertised float bounds alongside a value it would truncate (#98)."""
+        val = getattr(el, name, None)
+        if cls._data_type(el) == "INT" and isinstance(val, float) and val.is_integer():
+            return int(val)
+        return val
+
     def snapshot(self) -> RuntimeSnapshot:
         self._ensure()
         output_kinds = set(OUTPUT_KINDS)
@@ -260,9 +292,13 @@ class AppTestRuntime:
                 options=list(getattr(el, "options", []) or []) or None,
                 # A feedback widget carries no min/max of its own; its bounds are the option count
                 # implied by its style, so they're derived and advertised like any other range.
-                min=0 if kind == "feedback" else getattr(el, "min", None),
-                max=self._feedback_max(el) if kind == "feedback" else getattr(el, "max", None),
-                step=getattr(el, "step", None),
+                min=0 if kind == "feedback" else self._numeric_bound(el, "min"),
+                max=self._feedback_max(el) if kind == "feedback" else self._numeric_bound(el, "max"),
+                step=self._numeric_bound(el, "step"),
+                data_type=self._data_type(el),
+                # A browser shows a disabled widget greyed out; AppTest rejects a write to one. The
+                # agent has to be told up front too, or it can only learn by failing a write (#160).
+                disabled=bool(getattr(el, "disabled", False)),
             )
             for kind, idx, el in self._iter_widgets()
         ]
@@ -273,6 +309,14 @@ class AppTestRuntime:
                 text = self._output_text(kind, el)
                 if text is not None:
                     outputs.append(OutputSnapshot(kind=kind, text=text))
+        # st.toast is the app's answer to an action ("Saved!") and renders in the event block,
+        # outside the sidebar/main tree _walk covers — so it was dropped on every surface even
+        # though AppTest exposes it (#170). It floats over the page rather than sitting at a
+        # position in it, so it is reported after the document-order outputs.
+        for el in getattr(self.at, "toast", None) or []:
+            text = self._output_text("toast", el)
+            if text is not None:
+                outputs.append(OutputSnapshot(kind="toast", text=text))
         return RuntimeSnapshot(
             widgets=widgets,
             outputs=outputs,
@@ -300,8 +344,26 @@ class AppTestRuntime:
             label = getattr(el, "label", None)
             delta = getattr(el, "delta", None)
             text = f"{label}: {value}" if label else str(value)
-            return f"{text} ({delta})" if delta else text
+            if not delta:
+                return text
+            verdict = cls._metric_verdict(el)
+            return f"{text} ({delta}, {verdict})" if verdict else f"{text} ({delta})"
         return cls._truncate(str(value))
+
+    # A metric delta's colour is the author's verdict on it, and it is NOT derivable from the
+    # delta's sign: delta_color="inverse" paints a rising error rate red. Reading only the delta
+    # made "+2%, bad" and "+8%, good" byte-identical to an agent (#174). Keyed by enum NAME, like
+    # the feedback scale; GRAY (delta_color="off") is neutral and adds nothing.
+    _METRIC_VERDICTS = {"GREEN": "good", "RED": "bad"}
+
+    @classmethod
+    def _metric_verdict(cls, el) -> Optional[str]:
+        proto = getattr(el, "proto", None)
+        try:
+            field = proto.DESCRIPTOR.fields_by_name["color"]
+            return cls._METRIC_VERDICTS.get(field.enum_type.values_by_number[proto.color].name)
+        except Exception:
+            return None
 
     @staticmethod
     def _truncate(text: str) -> str:
@@ -382,9 +444,10 @@ class AppTestRuntime:
         # a *fractional* value on an integer number_input, which AppTest truncates (#51).
         self._validate_arity(kind, identifier, el, coerced)
         self._validate_choice(kind, el, coerced)
+        # The type check runs before the bounds check: True and NaN both pass `lo <= v <= hi`.
+        self._validate_number(kind, identifier, el, coerced)
         self._validate_range(kind, el, coerced)
         self._validate_color(kind, coerced)
-        self._validate_number(kind, identifier, el, coerced)
         self._validate_feedback(kind, identifier, el, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
@@ -596,23 +659,54 @@ class AppTestRuntime:
             if above:
                 raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
 
-    @staticmethod
-    def _validate_number(kind: str, identifier: str, el, value: Any) -> None:
-        """Reject a fractional value for an *integer* number_input before it is written. AppTest
-        truncates it (30.5 -> 30) without raising, so set_widget stored a value the caller never
-        asked for and reported success — the silent-corruption sibling of #12/#55, noted while
-        fixing #51. An integral float (30.0) is lossless, so it passes."""
-        if kind != "number_input":
-            return
+    @classmethod
+    def _numeric_type(cls, kind: str, el) -> Optional[str]:
+        """"INT" or "FLOAT" for a numeric number_input/slider, else None (a date/time slider, or
+        any other kind). Falls back to the current value's type if the proto can't be read."""
+        if kind not in ("number_input", "slider"):
+            return None
+        dtype = cls._data_type(el)
+        if dtype in ("INT", "FLOAT"):
+            return dtype
+        if dtype is not None:
+            return None  # a DATE/TIME/DATETIME slider — not a number
         current = getattr(el, "value", None)
-        # bool is an int subclass; a float number_input takes fractional values fine.
-        if isinstance(current, bool) or not isinstance(current, int):
+        sample = current[0] if isinstance(current, (list, tuple)) and current else current
+        if isinstance(sample, bool) or not isinstance(sample, (int, float)):
+            return None
+        return "INT" if isinstance(sample, int) else "FLOAT"
+
+    @classmethod
+    def _validate_number(cls, kind: str, identifier: str, el, value: Any) -> None:
+        """Reject a value a numeric number_input/slider can't hold, before it is written. One guard
+        for both kinds and every handle of a range, because each hole below was found on one kind
+        and then again on the other:
+
+        * a **boolean** — ``bool`` is an ``int`` subclass, so ``True`` slipped every check and was
+          stored as ``1`` while ``"maybe"`` was rejected (#164 number_input, #169 slider);
+        * a **non-finite** float — every comparison with NaN is False, so it passed the range check
+          and AppTest silently reset the widget to its default, clobbering the prior value (#158);
+        * a **fractional** value on an *integer* widget — AppTest truncates 30.5 -> 30 without
+          raising (#51 number_input, #79 slider). Integer-ness comes from the proto's data type,
+          not the current value, so an empty ``value=None`` integer input is covered too (#161).
+          An integral float (30.0) is lossless, so it passes."""
+        dtype = cls._numeric_type(kind, el)
+        if dtype is None:
             return
-        if isinstance(value, float) and not value.is_integer():
-            raise RuntimeError_(
-                f"{value!r} is not a valid value for the integer number_input {identifier!r}; it "
-                f"would be truncated to {int(value)!r} — send a whole number"
-            )
+        for v in (value if isinstance(value, (list, tuple)) else (value,)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise RuntimeError_(
+                    f"{_display(v)} is not a valid number for {kind} {identifier!r}; send a number"
+                )
+            if not math.isfinite(v):
+                raise RuntimeError_(
+                    f"{v!r} is not a valid value for {kind} {identifier!r}; send a finite number"
+                )
+            if dtype == "INT" and isinstance(v, float) and not v.is_integer():
+                raise RuntimeError_(
+                    f"{v!r} is not a valid value for the integer {kind} {identifier!r}; it "
+                    f"would be truncated to {int(v)!r} — send a whole number"
+                )
 
     # A color_picker accepts only a #RGB / #RRGGBB hex string. AppTest normalizes anything
     # else (a bad hex, a CSS name, a wrong-length string) back to the widget default without
@@ -691,6 +785,18 @@ class AppTestRuntime:
                 f"{value!r} is not a valid time for time_input; use 24-hour 'HH:MM' like '09:30'"
             ) from None
 
+    @staticmethod
+    def _to_number(kind: str, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value  # a non-number is left for _validate_number to reject with a useful message
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                return float(value)
+            except ValueError:
+                raise RuntimeError_(f"{value!r} is not a valid number for {kind}") from None
+
     # accepted string spellings of a boolean, for checkbox/toggle set from the CLI
     _BOOL_STRINGS = {"true": True, "false": False, "1": True, "0": False,
                      "yes": True, "no": False, "on": True, "off": False}
@@ -731,16 +837,14 @@ class AppTestRuntime:
                 return int(value)
             except ValueError:
                 return value  # left for _validate_feedback to reject with a useful message
-        if kind == "number_input" and isinstance(value, str):
-            try:
-                return int(value)
-            except ValueError:
-                try:
-                    return float(value)
-                except ValueError:
-                    raise RuntimeError_(
-                        f"{value!r} is not a valid number for number_input"
-                    ) from None
+        if cls._numeric_type(kind, el) is not None:
+            # A number arrives as a string over the CLI (--set vol=55). A slider used to skip this
+            # and hand the raw string to AppTest, which raised inside the rerun ("could not convert
+            # string to float") — caught by the rollback, but as a leaked Python error rather than
+            # the clean message number_input gives. Both handles of a range are converted.
+            if isinstance(value, (list, tuple)):
+                return [cls._to_number(kind, v) for v in value]
+            return cls._to_number(kind, value)
         if kind in ("checkbox", "toggle"):
             return cls._to_bool(kind, value)
         if kind == "multiselect" and not isinstance(value, (list, tuple)):

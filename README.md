@@ -73,7 +73,7 @@ transport for local clients.
 
 | Tool | What it does |
 |---|---|
-| `list_widgets` / `get_layout` | introspect widgets (kind, label, value, constraints) |
+| `list_widgets` / `get_layout` | introspect widgets (kind, label, value, constraints, whether it's `disabled`) |
 | `set_widget(identifier, value)` | set a widget and rerun |
 | `click(identifier)` | click a button and rerun |
 | `read_output()` | the rendered element tree, agent-readable |
@@ -141,8 +141,10 @@ non-zero on an app exception (for CI/scripts).
   single-client use are unaffected.
 - **No concurrency locking.** Concurrent requests sharing one session are not serialized, and
   `AppTest` is not known to be re-entrant — use one in-flight request per session for now.
-- **Output capture** covers headings / markdown / caption / text; `st.write`, `st.error`, and
-  similar are a planned coverage expansion.
+- **Output capture** covers prose (`st.title`/`header`/`markdown`/`write`/`text`/…), status
+  (`st.success`/`error`/`warning`/`info`/`toast`) and data (`st.metric` — with its delta's
+  good/bad colour — `code`, `json`, `dataframe`, `table`). Charts, images and media are not
+  captured.
 
 ## License
 

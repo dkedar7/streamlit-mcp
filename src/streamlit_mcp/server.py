@@ -17,6 +17,7 @@ try:  # Context must be a module global so string annotations (PEP 563) resolve.
 except Exception:  # pragma: no cover - fastmcp without a Context export
     Context = None
 
+from . import __version__
 from .engine import Engine
 from .runtime import AppTestRuntime
 from .session import SessionManager
@@ -86,7 +87,9 @@ def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "st
     ``auth`` is a FastMCP auth provider (see ``bearer_auth``); when set, the HTTP/SSE
     transport requires a valid bearer token. It has no effect on stdio.
     """
-    mcp = FastMCP(app_name, auth=auth)
+    # Without an explicit version FastMCP advertises its OWN in the initialize handshake, so a
+    # client saw "3.4.5" where the CLI's --version said ours (#84).
+    mcp = FastMCP(app_name, auth=auth, version=__version__)
     sessions = SessionManager(lambda: AppTestRuntime(app_path))
 
     def engine_for(ctx: Any) -> Engine:

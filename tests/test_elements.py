@@ -64,7 +64,7 @@ def test_tool_schema_checkbox_is_boolean():
 def test_tool_schema_slider_has_bounds():
     models = _models()
     v = tool_schema_for(models["slider"])["properties"]["value"]
-    assert v["type"] == "number" and v["minimum"] == 1 and v["maximum"] == 10
+    assert v["type"] == "integer" and v["minimum"] == 1 and v["maximum"] == 10  # int slider (#98)
 
 
 def test_tool_schema_multiselect_is_array():
