@@ -21,6 +21,11 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Run tests
         run: uv run --with pytest pytest -q
+      - name: Run tests against the latest allowed dependencies (what users install)
+        run: |
+          uv venv /tmp/latest
+          uv pip install --python /tmp/latest/bin/python . pytest
+          /tmp/latest/bin/python -m pytest -q
       - name: Build
         run: uv build
       - name: Publish to PyPI (Trusted Publishing)

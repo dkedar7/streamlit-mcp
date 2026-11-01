@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.9.0 (2026-11-01)
+
+Forms work again on current Streamlit, and a long-running HTTP/SSE server is safe to leave
+running: calls on one session are serialized and old sessions can be discarded.
+
+- **Fix:** the documented **`st.form` flow works on Streamlit 1.64+** (#151). `set_widget` used to
+  write a form field and rerun at once. From ~1.64 that rerun discards the pending value, so Submit
+  sent the *defaults* while every set had reported success. Earlier versions failed the other way:
+  the field committed to `session_state` with no submit at all (#130).
+
+    A form field is now held until its form's submit button is clicked, and the click sends every
+    held field in the same rerun, which is what a browser does. Until then the widget shows the
+    value you set, while `session_state` and the app's output are unchanged. A held value survives
+    other interactions before Submit, and each form's fields go only with that form's submit.
+    Invalid values are still rejected when set.
+
+- **Fix:** **concurrent calls on one session are serialized** (#178). FastMCP runs tools in a
+  threadpool, so two in-flight calls on one HTTP/SSE session drove the same AppTest from two
+  threads. That was worse than the README's caution suggested: 10 concurrent `click`s on one
+  session wedged AppTest until its 30s run timeout. A second call on a session now waits for the
+  first, different sessions still run in parallel, and creating a session is atomic (two
+  first-touch calls used to build and run the app twice).
+
+- **New:** **`serve --session-ttl SECONDS` and `--max-sessions N`** (#179). Every client session
+  used to live for the life of the process. A session idle past the TTL, or the least recently used
+  one beyond the cap, is discarded, and that client's next call starts a fresh app session. A
+  session with a call in flight is never discarded. Both are off by default, so nothing changes
+  unless you set them.
+
+- **CI:** tests now also run against the **newest Streamlit/FastMCP the dependency constraints
+  allow**, weekly and before every release, as well as against the lock. CI only ever ran the
+  locked Streamlit 1.58 while a fresh install got 1.65+, which is how #151 shipped unnoticed.
+  One test that hard-coded 1.58's inability to deselect a `st.pills` (1.66 can) now asserts the
+  real invariant instead: a clear either lands or is rejected, never a silent no-op.
+
+- **Docs:** the README and security page describe the new session behaviour in place of the old
+  "not disposed" / "no locking" caveats. `docs/security.md` had kept the stale "output capture is
+  planned" line that 0.8.0 fixed only in the README (#75). Usage now says `--arg` values are JSON,
+  like `--set` (#168).
+
+**Behavior changes:** setting a form field no longer changes `session_state` or reruns the app
+until the form is submitted. On Streamlit ≤1.63 a field used to commit immediately; code relying
+on that should click Submit.
+
 ## 0.8.0 (2026-10-31)
 
 The newest nightly-dogfood findings. Most of them are one bug found five times: a numeric widget

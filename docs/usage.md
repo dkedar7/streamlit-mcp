@@ -56,7 +56,9 @@ tabs and containers.
 !!! note "Forms"
     An `st.form` is driven the way a human drives it: set the fields, then click the form's submit
     button (by its label, e.g. `--click "Submit"`). The submit button is reported as a regular
-    clickable `button`; clicking it commits the form and runs its body.
+    clickable `button`; clicking it commits the form and runs its body. As in a browser, a form
+    field you set is held until Submit: the widget shows the new value, but `session_state` and the
+    app's output don't change until the submit click sends every field in one rerun.
 
 !!! note "Atomic writes"
     Setting a `selectbox`/`radio`/`select_slider`/`multiselect` to an option that isn't offered
@@ -144,6 +146,11 @@ invokes one:
 streamlit-mcp inspect app.py                 # ...lists reset_all under "tools:"
 streamlit-mcp call app.py --tool reset_all   # invoke it; --arg key=value passes arguments
 ```
+
+An `--arg` value is JSON, like a `--set` value, falling back to a plain string when it isn't valid
+JSON. So `--arg n=5` passes the number `5`, exactly what an agent sends as `{"n": 5}`, and
+`--arg 'n="5"'` passes the string. For a parameter with no type annotation, that JSON value is what
+the function receives on both surfaces; annotate the parameter if the type matters.
 
 ## Drive it from the terminal
 

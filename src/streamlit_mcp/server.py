@@ -81,75 +81,82 @@ def _validate_transport(transport: str) -> str:
 
 
 def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "streamlit-mcp",
-                 auth: Optional[Any] = None):
+                 auth: Optional[Any] = None, session_ttl: Optional[float] = None,
+                 max_sessions: Optional[int] = None):
     """Construct a FastMCP server exposing the core tools (+ any semantic tools).
 
     ``auth`` is a FastMCP auth provider (see ``bearer_auth``); when set, the HTTP/SSE
-    transport requires a valid bearer token. It has no effect on stdio.
+    transport requires a valid bearer token. It has no effect on stdio. ``session_ttl`` (idle
+    seconds) and ``max_sessions`` bound how many per-client runtimes a long-running server keeps
+    (see SessionManager); both default to no eviction.
     """
     # Without an explicit version FastMCP advertises its OWN in the initialize handshake, so a
     # client saw "3.4.5" where the CLI's --version said ours (#84).
     mcp = FastMCP(app_name, auth=auth, version=__version__)
-    sessions = SessionManager(lambda: AppTestRuntime(app_path))
+    sessions = SessionManager(lambda: AppTestRuntime(app_path), ttl=session_ttl,
+                              max_sessions=max_sessions)
 
-    def engine_for(ctx: Any) -> Engine:
-        rt = sessions.get_or_create(_derive_session_id(ctx))
-        return Engine(rt, guard=guard, app_path=app_path)
+    def dispatch(ctx: Any, op: str, *args: Any) -> dict:
+        # The whole operation runs while holding the session, not just the lookup. A set_widget is
+        # a write, a rerun and a read, and a second call on the same session must not run in
+        # between (#178).
+        with sessions.use(_derive_session_id(ctx)) as rt:
+            return getattr(Engine(rt, guard=guard, app_path=app_path), op)(*args)
 
     if Context is not None:
         @mcp.tool
         def list_widgets(ctx: Context) -> dict:
             """List the app's widgets with their MCP tool schemas."""
-            return engine_for(ctx).list_widgets()
+            return dispatch(ctx, "list_widgets")
 
         @mcp.tool
         def get_layout(ctx: Context) -> dict:
             """Full layout: widgets, rendered outputs, session_state, unsupported elements."""
-            return engine_for(ctx).get_layout()
+            return dispatch(ctx, "get_layout")
 
         @mcp.tool
         def set_widget(identifier: str, value: Any, ctx: Context) -> dict:
             """Set a widget (by key or label) to a value and rerun."""
-            return engine_for(ctx).set_widget(identifier, value)
+            return dispatch(ctx, "set_widget", identifier, value)
 
         @mcp.tool
         def click(identifier: str, ctx: Context) -> dict:
             """Click a button (by key or label) and rerun."""
-            return engine_for(ctx).click(identifier)
+            return dispatch(ctx, "click", identifier)
 
         @mcp.tool
         def read_output(ctx: Context) -> dict:
             """Read the rendered element tree and session_state."""
-            return engine_for(ctx).read_output()
+            return dispatch(ctx, "read_output")
 
         @mcp.tool
         def get_state(ctx: Context) -> dict:
             """Return the app's session_state."""
-            return engine_for(ctx).get_state()
+            return dispatch(ctx, "get_state")
     else:  # pragma: no cover - fallback path
         @mcp.tool
         def list_widgets() -> dict:
-            return engine_for(None).list_widgets()
+            return dispatch(None, "list_widgets")
 
         @mcp.tool
         def get_layout() -> dict:
-            return engine_for(None).get_layout()
+            return dispatch(None, "get_layout")
 
         @mcp.tool
         def set_widget(identifier: str, value: Any) -> dict:
-            return engine_for(None).set_widget(identifier, value)
+            return dispatch(None, "set_widget", identifier, value)
 
         @mcp.tool
         def click(identifier: str) -> dict:
-            return engine_for(None).click(identifier)
+            return dispatch(None, "click", identifier)
 
         @mcp.tool
         def read_output() -> dict:
-            return engine_for(None).read_output()
+            return dispatch(None, "read_output")
 
         @mcp.tool
         def get_state() -> dict:
-            return engine_for(None).get_state()
+            return dispatch(None, "get_state")
 
     _register_semantic_tools(mcp, guard)
     return mcp
@@ -194,9 +201,14 @@ def _load_app_semantic_tools(app_path: str) -> None:
 
 
 def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
-          port: int = 8000, guard: Optional[Any] = None) -> None:
+          port: int = 8000, guard: Optional[Any] = None, session_ttl: Optional[float] = None,
+          max_sessions: Optional[int] = None) -> None:
     """Build and run the server on the chosen transport (blocking)."""
     _validate_transport(transport)
+    if session_ttl is not None and session_ttl <= 0:
+        raise ValueError(f"--session-ttl must be a positive number of seconds, got {session_ttl}")
+    if max_sessions is not None and max_sessions < 1:
+        raise ValueError(f"--max-sessions must be at least 1, got {max_sessions}")
     auth = None
     if transport in ("http", "sse"):
         auth = bearer_auth(guard)
@@ -209,7 +221,8 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
                 "a non-loopback host, or use 127.0.0.1 / stdio."
             )
     _load_app_semantic_tools(app_path)
-    mcp = build_server(app_path, guard=guard, auth=auth)
+    mcp = build_server(app_path, guard=guard, auth=auth, session_ttl=session_ttl,
+                       max_sessions=max_sessions)
     if transport == "stdio":
         mcp.run()
     else:

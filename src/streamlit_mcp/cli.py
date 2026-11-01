@@ -173,6 +173,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             host=args.host,
             port=args.port,
             guard=build_guardrails(args),
+            session_ttl=args.session_ttl,
+            max_sessions=args.max_sessions,
         )
     except ValueError as e:  # fail-closed / bad transport -> clean message, not a traceback
         print(str(e), file=sys.stderr)
@@ -311,6 +313,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--transport", choices=["stdio", "http", "sse"], default="stdio")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--session-ttl", dest="session_ttl", type=float, default=None,
+                         metavar="SECONDS",
+                         help="discard a client session idle for this long (HTTP/SSE; default: "
+                              "never). The client's next call starts a fresh app session")
+    p_serve.add_argument("--max-sessions", dest="max_sessions", type=int, default=None,
+                         metavar="N",
+                         help="keep at most N client sessions, discarding the least recently "
+                              "used (default: unlimited)")
     _add_guard_flags(p_serve, bearer=True)
     p_serve.set_defaults(func=cmd_serve)
 

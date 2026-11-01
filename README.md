@@ -85,7 +85,7 @@ segmented_control, feedback — including
 their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
 `st.date_input("Dates", (start, end))`), which advertise a 2-element array schema and take
 `[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
-form's submit button.
+form's submit button. As in a browser, the fields are held until Submit sends them together.
 
 Input widgets streamlit-mcp can't drive (file_uploader, camera_input, audio_input, chat_input,
 data_editor, …) are reported explicitly on every surface (text `--layout`,
@@ -136,11 +136,12 @@ non-zero on an app exception (for CI/scripts).
 
 ## Known limitations
 
-- **Sessions are not disposed.** Per-client isolation works, but there is no session-close
-  hook, so a long-running HTTP server accumulates one runtime per client. stdio and
-  single-client use are unaffected.
-- **No concurrency locking.** Concurrent requests sharing one session are not serialized, and
-  `AppTest` is not known to be re-entrant — use one in-flight request per session for now.
+- **Sessions.** Calls on one client session are serialized, so a second call waits for the first
+  rather than interleaving its rerun; different sessions run in parallel. A long-running HTTP/SSE
+  server keeps every client's session until restarted unless you bound it:
+  `serve --session-ttl 600` discards a session idle for 10 minutes, and `--max-sessions 50`
+  discards the least recently used beyond 50. A discarded client's next call starts a fresh app
+  session (its widget values and `session_state` are gone). stdio is a single session either way.
 - **Output capture** covers prose (`st.title`/`header`/`markdown`/`write`/`text`/…), status
   (`st.success`/`error`/`warning`/`info`/`toast`) and data (`st.metric` — with its delta's
   good/bad colour — `code`, `json`, `dataframe`, `table`). Charts, images and media are not
