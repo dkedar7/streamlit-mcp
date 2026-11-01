@@ -223,3 +223,29 @@ def test_version_flag_names_the_installed_streamlit(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
     assert f"streamlit {streamlit.__version__}" in capsys.readouterr().out
+
+
+# --- 0.9.1 #182/#145: the rejection message states the bound in the form the schema advertises ---
+@pytest.mark.parametrize("ident,bad,expected", [
+    ("age", 500, "500 is out of range for number_input: maximum is 120"),   # was 120.0
+    ("vol", -5, "-5 is out of range for slider: minimum is 0"),              # was 0.0
+    ("price", 150.5, "150.5 is out of range for number_input: maximum is 100.0"),  # float stays
+])
+def test_out_of_range_message_matches_the_advertised_bound(ident, bad, expected):
+    from streamlit_mcp.runtime import RuntimeError_
+    with pytest.raises(RuntimeError_) as e:
+        _numeric_rt().set_widget(ident, bad)
+    assert str(e.value) == expected
+
+
+def test_date_range_message_uses_iso_strings_not_python_reprs():
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=(
+        "import datetime as dt\nimport streamlit as st\n"
+        "st.date_input('D', dt.date(2026, 6, 1), min_value=dt.date(2026, 1, 1), "
+        "max_value=dt.date(2026, 6, 30), key='d')\n"
+    ))
+    rt.run()
+    with pytest.raises(RuntimeError_) as e:
+        rt.set_widget("d", "2026-07-15")
+    assert str(e.value) == "'2026-07-15' is out of range for date_input: maximum is '2026-06-30'"
