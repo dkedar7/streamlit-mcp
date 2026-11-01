@@ -169,6 +169,9 @@ class AppTestRuntime:
         else:
             raise ValueError("provide app_path or script")
         self._started = False
+        # Writes to st.form fields that are waiting for that form's submit click:
+        # form id -> {widget id -> value}. See _hold_for_submit.
+        self._pending_forms: dict[str, dict[str, Any]] = {}
 
     def _run_script(self) -> None:
         """Run the app, keeping its stdout output (tracebacks, print) off our stdout. Uses a
@@ -282,13 +285,15 @@ class AppTestRuntime:
     def snapshot(self) -> RuntimeSnapshot:
         self._ensure()
         output_kinds = set(OUTPUT_KINDS)
+        pending = {wid: v for held in self._pending_forms.values() for wid, v in held.items()}
         widgets = [
             WidgetSnapshot(
                 kind=kind,
                 index=idx,
                 key=getattr(el, "key", None),
                 label=getattr(el, "label", None),
-                value=getattr(el, "value", None),
+                # A form field shows what was typed into it even before Submit, as in a browser.
+                value=pending.get(self._widget_id(el), getattr(el, "value", None)),
                 options=list(getattr(el, "options", []) or []) or None,
                 # A feedback widget carries no min/max of its own; its bounds are the option count
                 # implied by its style, so they're derived and advertised like any other range.
@@ -428,6 +433,12 @@ class AppTestRuntime:
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
         coerced = self._coerce(kind, value, el)
+        form = self._form_id(el)
+        if form:
+            if coerced is not None:  # a null on a form field is held as-is, like any other value
+                self._validate_all(kind, identifier, el, coerced)
+            self._hold_for_submit(form, el, coerced)
+            return
         # Setting a widget to null means "return it to its no-value/no-selection state" — the state
         # a value=None / index=None placeholder is born in and reports as its value. It's not an
         # option/number/date to validate, so it takes one shared attempt-and-verify path across
@@ -442,13 +453,7 @@ class AppTestRuntime:
         # reverts the same silent way (#31), so it needs its own up-front check as well. So does
         # a wrong *arity* — a scalar sent to a two-handle range widget, or vice versa (#55) — and
         # a *fractional* value on an integer number_input, which AppTest truncates (#51).
-        self._validate_arity(kind, identifier, el, coerced)
-        self._validate_choice(kind, el, coerced)
-        # The type check runs before the bounds check: True and NaN both pass `lo <= v <= hi`.
-        self._validate_number(kind, identifier, el, coerced)
-        self._validate_range(kind, el, coerced)
-        self._validate_color(kind, coerced)
-        self._validate_feedback(kind, identifier, el, coerced)
+        self._validate_all(kind, identifier, el, coerced)
         prior = getattr(el, "value", None)
         self._set(kind, el, coerced)
         try:
@@ -461,6 +466,36 @@ class AppTestRuntime:
             raise RuntimeError_(
                 f"setting {identifier!r} to {value!r} failed and was rolled back: {e}"
             ) from e
+
+    def _validate_all(self, kind: str, identifier: str, el, value: Any) -> None:
+        self._validate_arity(kind, identifier, el, value)
+        self._validate_choice(kind, el, value)
+        # The type check runs before the bounds check: True and NaN both pass `lo <= v <= hi`.
+        self._validate_number(kind, identifier, el, value)
+        self._validate_range(kind, el, value)
+        self._validate_color(kind, value)
+        self._validate_feedback(kind, identifier, el, value)
+
+    @staticmethod
+    def _form_id(el) -> str:
+        """The st.form an element belongs to ('' outside any form)."""
+        return getattr(getattr(el, "proto", None), "form_id", "") or ""
+
+    def _hold_for_submit(self, form: str, el, value: Any) -> None:
+        """Hold a write to an st.form field until that form's submit button is clicked.
+
+        In a browser, typing into a form field changes nothing until Submit: no rerun, no
+        session_state update. Then Submit sends every field and the click together, in one rerun.
+        set_widget used to write the field and rerun right away, which AppTest handles in two
+        version-dependent ways, both wrong. Up to ~1.63 the field committed without a submit
+        (#130), a state no browser user can produce. From ~1.64 the non-submit rerun DISCARDED the
+        pending value, so Submit sent the defaults while every set had reported success (#151).
+
+        Holding the value here and applying it in the submit's own rerun (see click) is the browser
+        model, and it doesn't depend on which way AppTest treats an intervening rerun. A held value
+        also survives other interactions before Submit (a widget outside the form, another
+        button), the same way a browser keeps unsubmitted text in a form."""
+        self._pending_forms.setdefault(form, {})[self._widget_id(el)] = value
 
     def _clear_to_none(self, identifier: str, kind: str, el) -> None:
         """Set any widget to null — its no-value/no-selection state. A widget built with
@@ -512,6 +547,15 @@ class AppTestRuntime:
         kind, el = self._find(identifier)
         if kind != "button":
             raise RuntimeError_(f"{identifier!r} is not a button")
+        form = self._form_id(el)
+        held = self._pending_forms.pop(form, {}) if form else {}
+        if held:
+            # A submit sends its form's held field values in the SAME rerun as the click (see
+            # _hold_for_submit). The fields are found by widget id, which is stable across reruns.
+            for k, _, w in self._iter_widgets():
+                wid = self._widget_id(w)
+                if wid in held:
+                    self._set(k, w, held[wid])
         el.click()
         self._run_script()
 

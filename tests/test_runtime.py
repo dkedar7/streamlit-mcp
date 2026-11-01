@@ -201,15 +201,21 @@ def test_multi_select_is_cleared_with_an_empty_list(bg):
     assert bg.snapshot().session_state["p2"] == []
 
 
-def test_clearing_a_selection_to_null_is_rejected_not_silently_ignored(bg):
-    """AppTest's set_value(None) is a silent no-op on a pills/segmented_control, so accepting null
-    would report success on a write that never happened. Rejected atomically, with a message that
-    says what is actually true rather than the placeholder story."""
+def test_clearing_a_selection_to_null_is_never_a_silent_no_op(bg):
+    """Whether AppTest can deselect a pills/segmented_control depends on the Streamlit version:
+    up to ~1.6x set_value(None) is a silent no-op, and on 1.66 it clears. Either way set_widget
+    must report what actually happened. If the clear landed it succeeds; if not, it is rejected
+    atomically with a message that says what is true, never a success on a write that didn't
+    happen."""
     from streamlit_mcp.runtime import RuntimeError_
     bg.set_widget("p1", "b")
-    with pytest.raises(RuntimeError_, match="no way to deselect"):
+    try:
         bg.set_widget("p1", None)
-    assert bg.snapshot().session_state["p1"] == "b"  # untouched
+    except RuntimeError_ as e:
+        assert "no way to deselect" in str(e)
+        assert bg.snapshot().session_state["p1"] == "b"  # untouched
+    else:
+        assert bg.snapshot().session_state["p1"] is None  # the clear really landed
 
 
 def test_every_advertised_button_group_value_round_trips(bg):
