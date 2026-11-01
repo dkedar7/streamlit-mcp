@@ -639,14 +639,17 @@ class AppTestRuntime:
                 f"valid ratings are {bound}"
             )
 
-    @staticmethod
-    def _validate_range(kind: str, el, value: Any) -> None:
+    @classmethod
+    def _validate_range(cls, kind: str, el, value: Any) -> None:
         """Reject a number_input/slider/date_input value outside the widget's [min, max]
         before it is written. AppTest silently resets an out-of-range value to the default
-        (run() does not raise), so the rollback net never fires — it must be caught up front."""
+        (run() does not raise), so the rollback net never fires — it must be caught up front.
+        The message names the bounds and value the way the tool advertises and accepts them:
+        integer bounds as integers (#182), dates as the ISO strings set_widget takes (#145)
+        — the same forms constraints/schema and _validate_arity use."""
         if kind not in ("number_input", "slider", "date_input"):
             return
-        lo, hi = getattr(el, "min", None), getattr(el, "max", None)
+        lo, hi = cls._numeric_bound(el, "min"), cls._numeric_bound(el, "max")
         if lo is None and hi is None:
             return
         for v in (value if isinstance(value, (list, tuple)) else (value,)):
@@ -655,9 +658,9 @@ class AppTestRuntime:
             except TypeError:
                 return  # value not comparable to the bounds — leave it to _coerce/AppTest
             if below:
-                raise RuntimeError_(f"{v!r} is out of range for {kind}: minimum is {lo!r}")
+                raise RuntimeError_(f"{_display(v)} is out of range for {kind}: minimum is {_display(lo)}")
             if above:
-                raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
+                raise RuntimeError_(f"{_display(v)} is out of range for {kind}: maximum is {_display(hi)}")
 
     @classmethod
     def _numeric_type(cls, kind: str, el) -> Optional[str]:
