@@ -251,6 +251,32 @@ def test_out_of_range_number_rejected_and_prior_value_preserved():
     assert "Count=0 " in _markdown(rt)[0]
 
 
+def test_out_of_range_message_reports_the_advertised_integer_bound():
+    """An INT widget advertises integer bounds in constraints and schema, so the rejection
+    names them as integers too (#182) — not the float AppTest keeps internally."""
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=RANGE_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_) as ei:
+        rt.set_widget("Count", 999)                 # above max 10
+    assert str(ei.value).endswith("maximum is 10")
+    with pytest.raises(RuntimeError_) as ei:
+        rt.set_widget("Level", -1)                  # below min 0
+    assert str(ei.value).endswith("minimum is 0")
+
+
+def test_out_of_range_date_message_uses_iso_strings():
+    """The date_input rejection names the value and the bounds as the ISO strings set_widget
+    accepts (#145) — the same _display() form _validate_arity uses — not datetime.date reprs."""
+    import datetime
+    from streamlit_mcp.runtime import AppTestRuntime, RuntimeError_
+    rt = AppTestRuntime(script=RANGE_APP)
+    rt.run()
+    with pytest.raises(RuntimeError_) as ei:
+        rt.set_widget("When", datetime.date(2027, 6, 1))
+    assert str(ei.value) == "'2027-06-01' is out of range for date_input: maximum is '2026-12-31'"
+
+
 # --- 0.3.4 #29: no input widget is silently dropped ---
 DROPPED_APP = (
     "import streamlit as st, datetime\n"
