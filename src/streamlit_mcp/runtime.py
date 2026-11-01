@@ -683,14 +683,19 @@ class AppTestRuntime:
                 f"valid ratings are {bound}"
             )
 
-    @staticmethod
-    def _validate_range(kind: str, el, value: Any) -> None:
+    @classmethod
+    def _validate_range(cls, kind: str, el, value: Any) -> None:
         """Reject a number_input/slider/date_input value outside the widget's [min, max]
         before it is written. AppTest silently resets an out-of-range value to the default
-        (run() does not raise), so the rollback net never fires — it must be caught up front."""
+        (run() does not raise), so the rollback net never fires — it must be caught up front.
+
+        The bounds are read through _numeric_bound, the same accessor the advertised schema uses,
+        and shown with _display. Reading el.min directly made the message say "maximum is 120.0"
+        under a schema advertising the integer 120 (#182), and repr() showed a date bound as
+        datetime.date(2026, 1, 31) rather than the ISO string a caller sends (#145)."""
         if kind not in ("number_input", "slider", "date_input"):
             return
-        lo, hi = getattr(el, "min", None), getattr(el, "max", None)
+        lo, hi = cls._numeric_bound(el, "min"), cls._numeric_bound(el, "max")
         if lo is None and hi is None:
             return
         for v in (value if isinstance(value, (list, tuple)) else (value,)):
@@ -699,9 +704,13 @@ class AppTestRuntime:
             except TypeError:
                 return  # value not comparable to the bounds — leave it to _coerce/AppTest
             if below:
-                raise RuntimeError_(f"{v!r} is out of range for {kind}: minimum is {lo!r}")
+                raise RuntimeError_(
+                    f"{_display(v)} is out of range for {kind}: minimum is {_display(lo)}"
+                )
             if above:
-                raise RuntimeError_(f"{v!r} is out of range for {kind}: maximum is {hi!r}")
+                raise RuntimeError_(
+                    f"{_display(v)} is out of range for {kind}: maximum is {_display(hi)}"
+                )
 
     @classmethod
     def _numeric_type(cls, kind: str, el) -> Optional[str]:

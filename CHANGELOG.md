@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 (2026-11-01)
+
+- **Fix:** an out-of-range rejection states the bound in the same form the schema advertises
+  (#182). 0.8.0 taught integer widgets to advertise `"maximum": 120`, but the rejection message
+  read the raw AppTest bound and said `maximum is 120.0`. The same message showed a date bound as
+  `datetime.date(2026, 6, 30)` rather than the `'2026-06-30'` a caller sends (#145). Both came from
+  the bound being read in two places; the check now uses the schema's accessor.
+
 ## 0.9.0 (2026-11-01)
 
 Forms work again on current Streamlit, and a long-running HTTP/SSE server is safe to leave
