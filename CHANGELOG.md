@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.2 (2026-11-02)
+
+- **Fix:** every identifier `list_widgets` advertises now resolves to the widget it was advertised
+  for (#186). A keyed widget is advertised by its key, but `_find` also matched it by its label. A
+  keyed `st.text_input("Search", key="q")` therefore took the handle of a button advertised as
+  `Search`: `click("Search")` failed with "'Search' is not a button", and
+  `set_widget("Search", ...)` wrote the text input while reporting success. `_find` now matches
+  each widget against its own advertised handle first, and both sides compute that handle with
+  one shared function. Naming a keyed widget by its label still works when no other widget is
+  advertised under that label.
+
 ## 0.9.1 (2026-11-01)
 
 - **Fix:** an out-of-range rejection states the bound in the same form the schema advertises
