@@ -17,6 +17,7 @@ from streamlit_mcp.server import (
 )
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+COLLISION_APP = str(Path(__file__).parent / "apps" / "keyed_label_collision_app.py")
 SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
 
 
@@ -92,3 +93,34 @@ def test_build_server_smoke():
     from fastmcp import FastMCP
     mcp = build_server(APP)
     assert isinstance(mcp, FastMCP)
+
+
+def test_mcp_client_routes_only_to_the_advertised_identifier():
+    import asyncio
+
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError
+
+    async def run():
+        async with Client(build_server(COLLISION_APP)) as client:
+            widgets = (await client.call_tool("list_widgets", {})).data["widgets"]
+            assert [(w["kind"], w["identifier"]) for w in widgets] == [
+                ("text_input", "q"),
+                ("button", "Search"),
+            ]
+
+            with pytest.raises(ToolError, match="is a button; use click"):
+                await client.call_tool(
+                    "set_widget", {"identifier": "Search", "value": "hello"}
+                )
+            assert (await client.call_tool("get_state", {})).data["q"] == ""
+
+            await client.call_tool("click", {"identifier": "Search"})
+            state = (await client.call_tool("get_state", {})).data
+            assert state["search_count"] == 1
+            assert state["q"] == ""
+
+            await client.call_tool("set_widget", {"identifier": "q", "value": "hello"})
+            assert (await client.call_tool("get_state", {})).data["q"] == "hello"
+
+    asyncio.run(run())

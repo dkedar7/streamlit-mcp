@@ -11,6 +11,7 @@ from streamlit_mcp.guardrails import Guardrails
 from streamlit_mcp.runtime import AppTestRuntime
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+COLLISION_APP = str(Path(__file__).parent / "apps" / "keyed_label_collision_app.py")
 
 
 # --- 0.3.3 #26: read-only / allow-list gate semantic tools too ---
@@ -92,6 +93,17 @@ def test_guard_allow_list_blocks_disallowed():
     eng.set_widget("Name", "ok")  # allowed
     with pytest.raises(PermissionDenied):
         eng.set_widget("Level", 3)  # not in allow-list
+
+
+def test_guard_allow_list_uses_the_same_identifier_target_as_runtime():
+    rt = AppTestRuntime(COLLISION_APP)
+    rt.run()
+    eng = Engine(rt, guard=Guardrails(allow_list={"q"}))
+
+    with pytest.raises(PermissionDenied):
+        eng.click("Search")
+
+    assert eng.get_state().get("search_count", 0) == 0
 
 
 def test_guard_filters_visible_widgets():

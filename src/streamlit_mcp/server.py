@@ -116,12 +116,12 @@ def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "st
 
         @mcp.tool
         def set_widget(identifier: str, value: Any, ctx: Context) -> dict:
-            """Set a widget (by key or label) to a value and rerun."""
+            """Set a widget by its identifier from list_widgets and rerun."""
             return dispatch(ctx, "set_widget", identifier, value)
 
         @mcp.tool
         def click(identifier: str, ctx: Context) -> dict:
-            """Click a button (by key or label) and rerun."""
+            """Click a button by its identifier from list_widgets and rerun."""
             return dispatch(ctx, "click", identifier)
 
         @mcp.tool

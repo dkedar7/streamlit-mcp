@@ -14,6 +14,7 @@ from streamlit_mcp.runtime import (
 )
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+COLLISION_APP = str(Path(__file__).parent / "apps" / "keyed_label_collision_app.py")
 
 
 @pytest.fixture()
@@ -86,6 +87,26 @@ def test_clicking_non_button_raises(rt):
 def test_setting_button_raises(rt):
     with pytest.raises(Exception):
         rt.set_widget("Save", "x")
+
+
+def test_click_resolves_keyless_widget_label_over_another_widgets_label():
+    rt = AppTestRuntime(COLLISION_APP)
+    rt.run()
+
+    rt.click("Search")
+
+    assert rt.snapshot().session_state["search_count"] == 1
+    assert rt.snapshot().session_state["q"] == ""
+
+
+def test_setting_keyless_widget_label_does_not_mutate_keyed_widget():
+    rt = AppTestRuntime(COLLISION_APP)
+    rt.run()
+
+    with pytest.raises(Exception, match="is a button; use click"):
+        rt.set_widget("Search", "hello")
+
+    assert rt.snapshot().session_state["q"] == ""
 
 
 def test_runtime_satisfies_protocol(rt):

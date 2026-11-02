@@ -17,7 +17,7 @@ from .elements import (
     tool_schema_for,
     widgets_to_models,
 )
-from .runtime import Runtime
+from .runtime import SUPPORTED_KINDS, Runtime
 
 
 class PermissionDenied(Exception):
@@ -125,13 +125,24 @@ class Engine:
     def _guard_allowed(self, identifier: str) -> None:
         if self.guard is None or self.guard.is_allowed(identifier):
             return
-        # The caller may pass a key or a label; allow if the resolved widget's identifier
-        # OR label is allow-listed (consistent with filter_widgets, which matches both).
-        for m in widgets_to_models(self.rt.snapshot()):
-            if identifier in (m["identifier"], m["label"]):
-                if self.guard.is_allowed(m["identifier"]) or (
-                    m["label"] and self.guard.is_allowed(m["label"])
-                ):
-                    return
-                break
+        # Select the same target Runtime will use before applying the label-compatible allow-list.
+        # Otherwise a keyed widget's label can authorize a different widget whose advertised
+        # identifier wins the actual operation.
+        models = widgets_to_models(self.rt.snapshot())
+        ranked = sorted(models, key=lambda m: SUPPORTED_KINDS.index(m["kind"]))
+        target = next((m for m in ranked if m.get("key") == identifier), None)
+        if target is None:
+            target = next(
+                (m for m in ranked if not m.get("key") and m.get("label") == identifier),
+                None,
+            )
+        if target is None:
+            target = next((m for m in models if m.get("identifier") == identifier), None)
+        if target is None:
+            target = next((m for m in ranked if m.get("label") == identifier), None)
+        if target is not None and (
+            self.guard.is_allowed(target["identifier"])
+            or (target["label"] and self.guard.is_allowed(target["label"]))
+        ):
+            return
         raise PermissionDenied(f"widget {identifier!r} is not in the allow-list")

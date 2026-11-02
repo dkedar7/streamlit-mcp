@@ -87,20 +87,25 @@ def _split_assignment(item: str) -> tuple[str, Any]:
 def _set_targets(eng) -> dict[str, dict]:
     """Every identifier/key/label an app's widgets answer to -> the widget model `--set` will
     actually write to. `--set` needs the target's kind and options to know how to read the raw
-    value (see _resolve_value), so this must name the *same* widget the runtime will resolve:
-    it mirrors ``runtime._find`` — key before label, kinds in SUPPORTED_KINDS order, then the
-    ``kind[index]`` fallback. Otherwise an app with two same-named widgets of different kinds
-    would have its value parsed against one widget and written to the other."""
+    value (see _resolve_value), so exact advertised identifiers are populated before the legacy
+    key/label aliases that runtime._find still accepts for compatibility."""
     ranked = sorted(  # stable: document order is preserved within a kind
         eng.list_widgets()["widgets"], key=lambda w: SUPPORTED_KINDS.index(w["kind"])
     )
     targets: dict[str, dict] = {}
-    for by in ("key", "label"):
-        for w in ranked:
+    for w in ranked:
+        if w.get("key"):
+            targets.setdefault(w["identifier"], w)
+    for w in ranked:
+        if not w.get("key") and w.get("label"):
+            targets.setdefault(w["identifier"], w)
+    for w in ranked:
+        if not w.get("key") and not w.get("label"):
+            targets.setdefault(w["identifier"], w)
+    for w in ranked:
+        for by in ("key", "label"):
             if w.get(by):
                 targets.setdefault(w[by], w)
-    for w in ranked:
-        targets.setdefault(w["identifier"], w)
     return targets
 
 

@@ -797,17 +797,31 @@ class AppTestRuntime:
         # normal "not found", not a crash.
         if not isinstance(identifier, str):
             raise WidgetNotFound(f"no widget matching {identifier!r}")
-        # match on key first, then label (a widget is reachable by either, even though
-        # _identifier advertises key-if-present-else-label)
+        # First honor the exact identifier advertised for each widget. This keeps the
+        # list_widgets -> set_widget/click round-trip stable when a keyed widget's label happens
+        # to equal another widget's public identifier.
+        for kind in SUPPORTED_KINDS:
+            for el in getattr(self.at, kind, []):
+                if getattr(el, "key", None) == identifier:
+                    return kind, el
+        for kind in SUPPORTED_KINDS:
+            for el in getattr(self.at, kind, []):
+                if (not getattr(el, "key", None)
+                        and getattr(el, "label", None) == identifier):
+                    return kind, el
+        for kind, idx, el in self._iter_widgets():
+            if not getattr(el, "key", None) and not getattr(el, "label", None):
+                if f"{kind}[{idx}]" == identifier:
+                    return kind, el
+        # Keep accepting labels as a compatibility alias for keyed widgets when no advertised
+        # identifier matched. The exact pass above ensures this alias cannot shadow a real handle.
         for by in ("key", "label"):
             for kind in SUPPORTED_KINDS:
                 for el in getattr(self.at, kind, []):
                     if getattr(el, by, None) == identifier:
                         return kind, el
-        # then the ``kind[index]`` fallback _identifier hands out for a keyless, empty-label
-        # widget — resolved through the SAME document-order numbering snapshot() advertises, so
-        # the list_widgets -> set_widget round-trip holds. Without this the advertised identifier
-        # is a dead handle: the one string the tool tells you to use, and the one _find rejects (#41).
+        # Preserve the legacy kind[index] fallback for runtimes that expose an indexed widget not
+        # represented by the advertised snapshot identifier.
         m = re.fullmatch(r"(\w+)\[(\d+)\]", identifier)
         if m:
             want_kind, want_idx = m.group(1), int(m.group(2))

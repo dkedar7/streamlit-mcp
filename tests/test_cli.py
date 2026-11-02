@@ -11,6 +11,7 @@ from streamlit_mcp.cli import _parse_value, _split_assignment, build_parser, mai
 from streamlit_mcp.decorator import clear_registry
 
 APP = str(Path(__file__).parent / "apps" / "sample_app.py")
+COLLISION_APP = str(Path(__file__).parent / "apps" / "keyed_label_collision_app.py")
 SEMANTIC_APP = str(Path(__file__).parent / "apps" / "semantic_app.py")
 RAISES_APP = str(Path(__file__).parent / "apps" / "raises_app.py")
 
@@ -44,6 +45,18 @@ def test_call_click_and_state(capsys):
     out = capsys.readouterr().out
     assert "saves = 1" in out
     assert "'agent'" in out  # name applied
+
+
+def test_call_routes_an_advertised_identifier_before_a_keyed_widgets_label(capsys):
+    assert _run(["call", COLLISION_APP, "--click", "Search", "--state", "--json"]) == 0
+    state = json.loads(capsys.readouterr().out)
+    assert state["search_count"] == 1
+    assert state["q"] == ""
+
+
+def test_call_rejects_setting_a_button_identifier_without_mutating_state(capsys):
+    assert _run(["call", COLLISION_APP, "--set", "Search=hello", "--state"]) == 1
+    assert "is a button; use click" in capsys.readouterr().err
 
 
 def test_call_typed_values(capsys):
