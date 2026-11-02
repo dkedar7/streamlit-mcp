@@ -115,6 +115,12 @@ class WidgetNotFound(RuntimeError_):
     """Raised when an identifier matches no widget."""
 
 
+def advertised_identifier(kind: str, index: int, key: Optional[str], label: Optional[str]) -> str:
+    """The one handle a widget is advertised under — key, else label, else ``kind[index]``. Both
+    list_widgets (what an agent is told) and _find (what a write resolves) use it."""
+    return key or label or f"{kind}[{index}]"
+
+
 @dataclass
 class WidgetSnapshot:
     kind: str
@@ -791,29 +797,27 @@ class AppTestRuntime:
     def _find(self, identifier: str):
         self._ensure()
         # A non-string identifier (None, an int, ...) can't name a widget — reject it cleanly up
-        # front. Otherwise it would sail past the key/label comparisons (and even wrongly match a
-        # keyless widget when it's None) and reach re.fullmatch(), which raises a raw TypeError
-        # instead of a clean WidgetNotFound. An agent that omits/nulls the identifier should get a
+        # front. Otherwise None would wrongly match a keyless widget's missing key in the fallback
+        # pass instead of giving a clean WidgetNotFound. An agent that omits/nulls the identifier should get a
         # normal "not found", not a crash.
         if not isinstance(identifier, str):
             raise WidgetNotFound(f"no widget matching {identifier!r}")
-        # match on key first, then label (a widget is reachable by either, even though
-        # _identifier advertises key-if-present-else-label)
+        # An advertised identifier always means the widget it was advertised for: match each
+        # widget against its OWN advertised handle (key, else label, else ``kind[index]``), via the
+        # same document-order walk and the same rule snapshot() uses, so list_widgets -> set_widget
+        # round-trips (#41). Before, a keyed widget was also matched by its label, so a keyed
+        # text_input labelled "Search" shadowed a button advertised as "Search" (#186).
+        for kind, idx, el in self._iter_widgets():
+            if advertised_identifier(kind, idx, getattr(el, "key", None),
+                                     getattr(el, "label", None)) == identifier:
+                return kind, el
+        # Otherwise a key, then a label, still reaches a widget no handle was advertised for
+        # under that name — the long-standing convenience of naming a keyed widget by its label.
         for by in ("key", "label"):
             for kind in SUPPORTED_KINDS:
                 for el in getattr(self.at, kind, []):
                     if getattr(el, by, None) == identifier:
                         return kind, el
-        # then the ``kind[index]`` fallback _identifier hands out for a keyless, empty-label
-        # widget — resolved through the SAME document-order numbering snapshot() advertises, so
-        # the list_widgets -> set_widget round-trip holds. Without this the advertised identifier
-        # is a dead handle: the one string the tool tells you to use, and the one _find rejects (#41).
-        m = re.fullmatch(r"(\w+)\[(\d+)\]", identifier)
-        if m:
-            want_kind, want_idx = m.group(1), int(m.group(2))
-            for kind, idx, el in self._iter_widgets():
-                if kind == want_kind and idx == want_idx:
-                    return kind, el
         raise WidgetNotFound(f"no widget matching {identifier!r}")
 
     @staticmethod
