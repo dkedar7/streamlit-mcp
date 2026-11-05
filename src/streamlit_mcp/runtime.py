@@ -115,6 +115,12 @@ class WidgetNotFound(RuntimeError_):
     """Raised when an identifier matches no widget."""
 
 
+def advertised_identifier(kind: str, index: int, key: Optional[str], label: Optional[str]) -> str:
+    """The one handle a widget is advertised under — key, else label, else ``kind[index]``. Both
+    list_widgets (what an agent is told) and _find (what a write resolves) use it."""
+    return key or label or f"{kind}[{index}]"
+
+
 @dataclass
 class WidgetSnapshot:
     kind: str
@@ -791,30 +797,22 @@ class AppTestRuntime:
     def _find(self, identifier: str):
         self._ensure()
         # A non-string identifier (None, an int, ...) can't name a widget — reject it cleanly up
-        # front. Otherwise it would sail past the key/label comparisons (and even wrongly match a
-        # keyless widget when it's None) and reach re.fullmatch(), which raises a raw TypeError
-        # instead of a clean WidgetNotFound. An agent that omits/nulls the identifier should get a
+        # front. Otherwise None would wrongly match a keyless widget's missing key in the fallback
+        # pass instead of giving a clean WidgetNotFound. An agent that omits/nulls the identifier should get a
         # normal "not found", not a crash.
         if not isinstance(identifier, str):
             raise WidgetNotFound(f"no widget matching {identifier!r}")
-        # First honor the exact identifier advertised for each widget. This keeps the
-        # list_widgets -> set_widget/click round-trip stable when a keyed widget's label happens
-        # to equal another widget's public identifier.
-        for kind in SUPPORTED_KINDS:
-            for el in getattr(self.at, kind, []):
-                if getattr(el, "key", None) == identifier:
-                    return kind, el
-        for kind in SUPPORTED_KINDS:
-            for el in getattr(self.at, kind, []):
-                if (not getattr(el, "key", None)
-                        and getattr(el, "label", None) == identifier):
-                    return kind, el
+        # An advertised identifier always means the widget it was advertised for: match each
+        # widget against its OWN advertised handle (key, else label, else ``kind[index]``), via the
+        # same document-order walk and the same rule snapshot() uses, so list_widgets -> set_widget
+        # round-trips (#41). Before, a keyed widget was also matched by its label, so a keyed
+        # text_input labelled "Search" shadowed a button advertised as "Search" (#186).
         for kind, idx, el in self._iter_widgets():
-            if not getattr(el, "key", None) and not getattr(el, "label", None):
-                if f"{kind}[{idx}]" == identifier:
-                    return kind, el
-        # Keep accepting labels as a compatibility alias for keyed widgets when no advertised
-        # identifier matched. The exact pass above ensures this alias cannot shadow a real handle.
+            if advertised_identifier(kind, idx, getattr(el, "key", None),
+                                     getattr(el, "label", None)) == identifier:
+                return kind, el
+        # Otherwise a key, then a label, still reaches a widget no handle was advertised for
+        # under that name — the long-standing convenience of naming a keyed widget by its label.
         for by in ("key", "label"):
             for kind in SUPPORTED_KINDS:
                 for el in getattr(self.at, kind, []):
@@ -822,6 +820,12 @@ class AppTestRuntime:
                         return kind, el
         # Preserve the legacy kind[index] fallback for runtimes that expose an indexed widget not
         # represented by the advertised snapshot identifier.
+        m = re.fullmatch(r"(\w+)\[(\d+)\]", identifier)
+        if m:
+            want_kind, want_idx = m.group(1), int(m.group(2))
+            for kind, idx, el in self._iter_widgets():
+                if kind == want_kind and idx == want_idx:
+                    return kind, el
         m = re.fullmatch(r"(\w+)\[(\d+)\]", identifier)
         if m:
             want_kind, want_idx = m.group(1), int(m.group(2))

@@ -12,7 +12,7 @@ import datetime
 import re
 from typing import Any
 
-from .runtime import BUTTON_GROUP_KINDS, RuntimeSnapshot, WidgetSnapshot
+from .runtime import BUTTON_GROUP_KINDS, RuntimeSnapshot, WidgetSnapshot, advertised_identifier
 
 # Widgets that take a value via set_widget vs. the action-only button.
 ACTION_KINDS = ("button",)
@@ -68,7 +68,7 @@ def serialize_value(value: Any) -> Any:
 
 
 def _identifier(w: WidgetSnapshot) -> str:
-    return w.key or w.label or f"{w.kind}[{w.index}]"
+    return advertised_identifier(w.kind, w.index, w.key, w.label)
 
 
 def _constraints(w: WidgetSnapshot) -> dict:
