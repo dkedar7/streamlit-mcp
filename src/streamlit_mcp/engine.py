@@ -94,7 +94,16 @@ class Engine:
         models = widgets_to_models(snap)
         if self.guard is not None and hasattr(self.guard, "filter_widgets"):
             models = self.guard.filter_widgets(models)
+        # A widget keyed by a redacted name is still listed and drivable, but its current value
+        # is withheld, like the session_state entry it mirrors (#191).
+        for m in models:
+            if self._redacted(m.get("key")):
+                del m["value"]
+                m["redacted"] = True
         return models
+
+    def _redacted(self, key) -> bool:
+        return self.guard is not None and getattr(self.guard, "is_redacted", lambda k: False)(key)
 
     def _visible_state(self, snapshot) -> dict:
         """session_state with the values of allow-list-hidden widgets removed. Without this the
@@ -103,7 +112,10 @@ class Engine:
         write returns) — the allow-list would guard the widgets surface but not the state surface.
         Only keys that belong to a NON-allow-listed *widget* are dropped; non-widget app state
         (counters, flags an app stashes in session_state) is kept, so this doesn't over-hide."""
-        state = serialize_value(snapshot.session_state)
+        # --redact drops named keys outright, widget-backed or not (#191): the allow-list below
+        # deliberately keeps non-widget app state, which is exactly where a login token lives.
+        state = {k: v for k, v in serialize_value(snapshot.session_state).items()
+                 if not self._redacted(k)}
         if self.guard is None or getattr(self.guard, "allow_list", None) is None:
             return state
         hidden: set[str] = set()

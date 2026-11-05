@@ -66,6 +66,10 @@ by opting in with one `with` block (`from streamlit_mcp.live import live`). See 
 claude mcp add streamlit-mcp -- uvx streamlit-mcp serve /absolute/path/to/your/app.py
 ```
 
+The app path must be absolute, because the client starts the server from its own directory.
+`streamlit-mcp config app.py` prints the block above with the path filled in
+(`--client claude-code` prints the `claude mcp add` line instead).
+
 `uvx` runs the published package with no prior install. stdio (the default) is the right
 transport for local clients.
 
@@ -86,6 +90,8 @@ their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
 `st.date_input("Dates", (start, end))`), which advertise a 2-element array schema and take
 `[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
 form's submit button. As in a browser, the fields are held until Submit sends them together.
+Each field and submit button reports the `form` it belongs to, so in an app with several forms
+an agent clicks the submit whose `form` matches the fields it set.
 
 Input widgets streamlit-mcp can't drive (file_uploader, camera_input, audio_input, chat_input,
 data_editor, …) are reported explicitly on every surface (text `--layout`,
@@ -126,8 +132,9 @@ non-zero on an app exception (for CI/scripts).
 
 - **`app_path` is executed as trusted code** in the server process (that's how AppTest
   runs it). Only serve apps you trust.
-- **`get_state` / `read_output` expose the app's `session_state`** to the caller — do not
-  put secrets there.
+- **`get_state` / `read_output` expose the app's `session_state`** to the caller. If the app
+  keeps something sensitive there (a token stored after login, say), pass `--redact <key>` and
+  that key never leaves the server.
 - **HTTP/SSE bearer auth is enforced.** Pass `--bearer-token <T>` and every HTTP/SSE request
   must send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool
   runs. A non-loopback host is allowed **only** with a token set; without one, `serve` binds

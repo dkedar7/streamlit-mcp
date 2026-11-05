@@ -2,8 +2,8 @@
 
 - **`app_path` is executed as trusted code** in the server process (that's how `AppTest` runs
   it). Only serve apps you trust.
-- **`get_state` / `read_output` expose the app's `session_state`** to the caller — do not put
-  secrets there.
+- **`get_state` / `read_output` expose the app's `session_state`** to the caller. If the app
+  keeps something sensitive there, `--redact <key>` keeps it on the server (see below).
 - **HTTP/SSE bearer auth is enforced.** Pass `--bearer-token <T>` and every HTTP/SSE request must
   send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool runs. A
   non-loopback host is allowed **only** with a token set; without one, `serve` binds `127.0.0.1`
@@ -28,6 +28,17 @@ can't be set or clicked, **and its value is filtered out of every `session_state
 be sidestepped by reading state directly. App state that isn't a widget (counters, flags an app
 stashes in `session_state`) is preserved.
 
+`--redact <key>` (repeatable) keeps a `session_state` key's value off every read: `get_state`,
+`read_output`, `get_layout` and the state a write returns, on the CLI and over MCP. Use it for
+what an app stores itself, such as a token from a login flow; `--allow` can't hide that, because
+it deliberately keeps app state that isn't a widget. Redacting a widget's key also withholds the
+widget's value in `list_widgets`/`get_layout` (it's marked `"redacted": true`), but the widget
+can still be set.
+
+```bash
+streamlit-mcp serve app.py --redact access_token --redact user_email
+```
+
 They also cover **`@mcp_tool` semantic tools**, and fail closed: because streamlit-mcp can't know
 whether a given tool mutates, `--read-only` blocks *any* semantic tool, and `--allow` gates tool
 **names** too — `--allow reset_all` opts one specific tool back in. So `--read-only` really is a
@@ -45,6 +56,7 @@ look-but-don't-touch surface, including the higher-level action layer.
   (`st.success`/`error`/`warning`/`info`/`toast`) and data (`st.metric` — with its delta's
   good/bad colour — `code`, `json`, `dataframe`, `table`). Charts, images and media are not
   captured.
-- **`--allow` filters widget *state*, not rendered output.** If the app itself renders a hidden
-  widget's value into an output (e.g. `st.write(st.session_state["secret"])`), that text is still
-  returned — the allow-list governs widget access, not what the app chooses to display.
+- **`--allow` and `--redact` filter *state*, not rendered output.** If the app itself renders a
+  hidden value into an output (e.g. `st.write(st.session_state["secret"])`), that text is still
+  returned. The guardrails govern state and widget access, not what the app chooses to display.
+  `@mcp_tool` return values aren't filtered either.

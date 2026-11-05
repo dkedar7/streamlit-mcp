@@ -97,6 +97,9 @@ def widget_to_model(w: WidgetSnapshot) -> dict:
         # A disabled widget rejects every write, as it does for a browser user — advertised so an
         # agent can tell "locked right now" from "my value is wrong" without spending a call (#160).
         "disabled": w.disabled,
+        # The st.form a field or submit button belongs to (null outside a form). A form field's
+        # write is held until the button with the same ``form`` is clicked (#189).
+        "form": w.form,
     }
 
 

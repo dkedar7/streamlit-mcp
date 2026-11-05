@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.0 (2026-11-05)
+
+- **New:** every widget reports the **`form`** it belongs to (#189), on `list_widgets`,
+  `get_layout` and `inspect` (`[form: login]`); it is `null` outside a form. In an app with two
+  forms an agent had no way to tell which submit button sends which fields, and the wrong one
+  silently discarded the held fields. It now clicks the submit whose `form` matches.
+- **New:** **`--redact <key>`** on `serve`, `call`, `inspect` and `config` (#191). The named
+  `session_state` key is dropped from every read: `get_state`, `read_output`, `get_layout`, and the
+  state a write returns. It covers keys that aren't widgets, such as a token an app stores after
+  login, which `--allow` deliberately keeps. A redacted widget is still listed and settable, but
+  its value is withheld (`"redacted": true`).
+- **New:** **`streamlit-mcp config <app>`** prints ready-to-paste MCP client wiring with the app
+  path made absolute (#190). The default is an `mcpServers` JSON block, and
+  `--client claude-code` prints a `claude mcp add` command. Guardrail flags carry into the server
+  command, and `--transport http|sse` prints the URL wiring (with the bearer header). It warns if
+  the app file doesn't exist.
+
 ## 0.9.2 (2026-11-02)
 
 - **Fix:** every identifier `list_widgets` advertises now resolves to the widget it was advertised

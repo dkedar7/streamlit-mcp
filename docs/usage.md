@@ -58,7 +58,9 @@ tabs and containers.
     button (by its label, e.g. `--click "Submit"`). The submit button is reported as a regular
     clickable `button`; clicking it commits the form and runs its body. As in a browser, a form
     field you set is held until Submit: the widget shows the new value, but `session_state` and the
-    app's output don't change until the submit click sends every field in one rerun.
+    app's output don't change until the submit click sends every field in one rerun. Each field
+    and submit button reports the `form` it belongs to (`null` outside a form), so with several
+    forms, click the submit whose `form` matches the fields you set.
 
 !!! note "Atomic writes"
     Setting a `selectbox`/`radio`/`select_slider`/`multiselect` to an option that isn't offered
@@ -162,8 +164,16 @@ streamlit-mcp inspect app.py --layout --json # full layout (widgets, outputs, st
 streamlit-mcp call app.py --set "Name=agent" --click "Save" --read
 streamlit-mcp call app.py --read-only --set "Name=x"   # guardrail: blocked, exit 1
 streamlit-mcp call app.py --allow "Name" --set "Age=5"  # allow-list: 'Age' blocked, exit 1
+streamlit-mcp call app.py --redact access_token --state # that key is never printed
+streamlit-mcp config app.py                  # MCP client config, app path made absolute
 streamlit-mcp --version
 ```
+
+`config` prints an `mcpServers` JSON block for Claude Desktop, Cursor and similar clients, or with
+`--client claude-code` a `claude mcp add` command. It carries `--read-only`/`--allow`/`--redact`
+into the server command. With `--transport http` (or `sse`) it prints the URL wiring instead,
+including the `Authorization` header when you pass `--bearer-token`, and prints the `serve` command
+to start the server on stderr.
 
 A `--set` value is JSON-parsed for typed widgets (so `Age=5` is a number, `Tags=["a","b"]` a
 list, `Agree=true` a boolean), but for a `text_input`/`text_area` it's stored **literally** — so
