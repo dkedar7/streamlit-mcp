@@ -1,11 +1,12 @@
 """Guardrails: bound what an agent (or human) can do, uniformly across MCP and CLI.
 
-Three controls (origin R11):
+Four controls (origin R11):
   - read-only mode      -> reject state-changing tools (set_widget / click)
   - allow-list          -> only listed widgets are visible / settable
+  - redact              -> named session_state keys never leave the server (#191)
   - bearer token        -> gate the HTTP/SSE transport (stdio is local, no token)
 
-The engine consults ``can_write`` / ``is_allowed`` / ``filter_widgets`` so both surfaces
+The engine consults ``can_write`` / ``is_allowed`` / ``filter_widgets`` / ``is_redacted`` so both surfaces
 enforce identically. ``check_bearer`` / ``require_bearer`` are the auth primitives the HTTP
 transport applies to incoming requests.
 """
@@ -22,10 +23,12 @@ class Guardrails:
         read_only: bool = False,
         allow_list: Optional[set[str]] = None,
         bearer_token: Optional[str] = None,
+        redact_keys: Optional[set[str]] = None,
     ):
         self.read_only = read_only
         self.allow_list = set(allow_list) if allow_list is not None else None
         self.bearer_token = bearer_token
+        self.redact_keys = set(redact_keys or ())
 
     @classmethod
     def allow_all(cls) -> "Guardrails":
@@ -37,6 +40,9 @@ class Guardrails:
 
     def is_allowed(self, identifier: str) -> bool:
         return self.allow_list is None or identifier in self.allow_list
+
+    def is_redacted(self, key: Optional[str]) -> bool:
+        return key is not None and key in self.redact_keys
 
     def filter_widgets(self, models: list[dict]) -> list[dict]:
         if self.allow_list is None:

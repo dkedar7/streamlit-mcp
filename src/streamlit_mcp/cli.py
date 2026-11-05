@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shlex
 import sys
+from pathlib import Path
 from typing import Any, Optional
 
 from . import __version__
@@ -54,12 +56,14 @@ def build_guardrails(args: argparse.Namespace) -> Optional[Guardrails]:
     read_only = getattr(args, "read_only", False)
     allow = getattr(args, "allow", None)
     bearer = getattr(args, "bearer_token", None)
-    if not read_only and not allow and not bearer:
+    redact = getattr(args, "redact", None)
+    if not read_only and not allow and not bearer and not redact:
         return None
     return Guardrails(
         read_only=read_only,
         allow_list=set(allow) if allow else None,
         bearer_token=bearer,
+        redact_keys=set(redact) if redact else None,
     )
 
 
@@ -182,6 +186,60 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _serve_args(args: argparse.Namespace, app: str) -> list[str]:
+    """The ``serve`` argv that reproduces this config's app, transport and guardrails."""
+    argv = ["serve", app]
+    if args.transport != "stdio":
+        argv += ["--transport", args.transport, "--host", args.host, "--port", str(args.port)]
+    if args.read_only:
+        argv.append("--read-only")
+    for flag, values in (("--allow", args.allow), ("--redact", args.redact)):
+        for v in values or []:
+            argv += [flag, v]
+    if args.bearer_token:
+        argv += ["--bearer-token", args.bearer_token]
+    return argv
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    """Print ready-to-paste MCP client wiring for an app, with its path made absolute (#190).
+
+    A client launches the server from its own working directory, so a relative app path in a
+    client config points somewhere else; resolving it here makes the snippet correct as printed."""
+    app = Path(args.app).expanduser().resolve()
+    if not app.is_file():
+        print(f"warning: {app} does not exist (yet); the client will fail to start it",
+              file=sys.stderr)
+    serve_argv = _serve_args(args, str(app))
+    if args.transport == "stdio":
+        if args.client == "claude-code":
+            print(shlex.join(["claude", "mcp", "add", args.name, "--", "uvx", "streamlit-mcp",
+                              *serve_argv]))
+            return 0
+        entry: dict = {"command": "uvx", "args": ["streamlit-mcp", *serve_argv]}
+    else:
+        # The client connects to a server you run yourself; print that command for reference.
+        print("# start the server with: " + shlex.join(["uvx", "streamlit-mcp", *serve_argv]),
+              file=sys.stderr)
+        url = f"http://{args.host}:{args.port}/{'mcp' if args.transport == 'http' else 'sse'}"
+        if args.client == "claude-desktop":
+            print("Claude Desktop's config file only launches local stdio servers; use "
+                  "--transport stdio, or add the URL as a custom connector in its settings.",
+                  file=sys.stderr)
+            return 1
+        if args.client == "claude-code":
+            cmd = ["claude", "mcp", "add", "--transport", args.transport, args.name, url]
+            if args.bearer_token:
+                cmd += ["--header", f"Authorization: Bearer {args.bearer_token}"]
+            print(shlex.join(cmd))
+            return 0
+        entry = {"url": url}
+        if args.bearer_token:
+            entry["headers"] = {"Authorization": f"Bearer {args.bearer_token}"}
+    print(json.dumps({"mcpServers": {args.name: entry}}, indent=2))
+    return 0
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
     try:
         eng = _engine(args)  # runs the app, which also registers any @mcp_tool it defines
@@ -203,7 +261,10 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         return _report_exception(exception, args)
     for w in out["widgets"]:
         flag = " [action]" if w.get("action") else ""
-        print(f"  {w['kind']:<13} {w['identifier']:<14} = {w['value']!r}{flag}")
+        if w.get("form"):
+            flag += f" [form: {w['form']}]"
+        value = "<redacted>" if w.get("redacted") else repr(w.get("value"))
+        print(f"  {w['kind']:<13} {w['identifier']:<14} = {value}{flag}")
     if args.layout:
         for o in out.get("outputs", []):
             print(f"  [{o['kind']}] {o['text']}")
@@ -295,6 +356,9 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
                    help="block state-changing actions")
     p.add_argument("--allow", action="append",
                    help="allow-list a widget identifier (repeatable)")
+    p.add_argument("--redact", action="append", metavar="KEY",
+                   help="never return this session_state key's value, on any read "
+                        "(repeatable; e.g. a token the app stores after login)")
     if bearer:
         p.add_argument("--bearer-token", dest="bearer_token",
                        help="require this bearer token on HTTP/SSE (enforced — 401 if the "
@@ -323,6 +387,20 @@ def build_parser() -> argparse.ArgumentParser:
                               "used (default: unlimited)")
     _add_guard_flags(p_serve, bearer=True)
     p_serve.set_defaults(func=cmd_serve)
+
+    p_config = sub.add_parser(
+        "config", help="print MCP client config for an app (its path made absolute)")
+    p_config.add_argument("app")
+    p_config.add_argument("--client", choices=["generic", "claude-desktop", "cursor", "claude-code"],
+                          default="generic",
+                          help="claude-code prints a `claude mcp add` command; the others print "
+                               "an mcpServers JSON block (default: generic)")
+    p_config.add_argument("--name", default="streamlit-mcp", help="server name in the client")
+    p_config.add_argument("--transport", choices=["stdio", "http", "sse"], default="stdio")
+    p_config.add_argument("--host", default="127.0.0.1")
+    p_config.add_argument("--port", type=int, default=8000)
+    _add_guard_flags(p_config, bearer=True)
+    p_config.set_defaults(func=cmd_config)
 
     p_inspect = sub.add_parser("inspect", help="print the app's widgets")
     p_inspect.add_argument("app")

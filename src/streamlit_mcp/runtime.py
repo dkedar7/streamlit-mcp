@@ -136,6 +136,8 @@ class WidgetSnapshot:
     # off its proto — None for kinds that carry none. See AppTestRuntime._data_type.
     data_type: Optional[str] = None
     disabled: bool = False
+    # The st.form this widget belongs to (a field, or the form's submit button); None outside one.
+    form: Optional[str] = None
 
 
 @dataclass
@@ -310,6 +312,9 @@ class AppTestRuntime:
                 # A browser shows a disabled widget greyed out; AppTest rejects a write to one. The
                 # agent has to be told up front too, or it can only learn by failing a write (#160).
                 disabled=bool(getattr(el, "disabled", False)),
+                # Which submit sends this field: without it an agent driving a multi-form app has
+                # to guess, and a wrong guess silently discards the held fields (#189).
+                form=self._form_id(el) or None,
             )
             for kind, idx, el in self._iter_widgets()
         ]
