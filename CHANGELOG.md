@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.1 (2026-11-06)
+
+- **Fix:** redacting a widget no longer changes its advertised schema (#193). A widget's schema is
+  built from its current value: whether it's nullable, a range pair, or a multi-select. 0.10.0
+  withheld the value *before* building it, so a redacted text input or selectbox advertised
+  `null` as valid (and added it to the enum), which `set_widget` then rejected. The schema is now
+  built first and the value withheld afterward, so a redacted widget advertises exactly the
+  schema it would without `--redact`.
+
 ## 0.10.0 (2026-11-05)
 
 - **New:** every widget reports the **`form`** it belongs to (#189), on `list_widgets`,
