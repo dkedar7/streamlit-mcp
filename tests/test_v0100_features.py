@@ -194,3 +194,33 @@ def test_config_warns_on_a_missing_app(tmp_path, capsys):
     rc, out, err = _config(capsys, str(tmp_path / "nope.py"))
     assert rc == 0 and "does not exist" in err
     assert json.loads(out)["mcpServers"]["streamlit-mcp"]["args"][-1].endswith("nope.py")
+
+
+# --- 0.10.1 #193: redacting a value must not change the widget's advertised schema ---
+REDACT_SHAPES_APP = (
+    "import streamlit as st\n"
+    "st.text_input('Token', value='secret123', key='token')\n"
+    "st.selectbox('Role', ['admin', 'user'], key='role')\n"
+    "st.slider('Band', 0, 100, (20, 80), key='band')\n"
+    "st.pills('Tags', ['a', 'b'], selection_mode='multi', default=['a'], key='tags')\n"
+    "st.selectbox('Maybe', ['x', 'y'], index=None, key='maybe')\n"
+)
+
+
+def test_redaction_leaves_every_schema_exactly_as_advertised_without_it():
+    from streamlit_mcp.guardrails import Guardrails
+
+    def schemas(eng):
+        return {w["identifier"]: w["schema"] for w in eng.list_widgets()["widgets"]}
+
+    keys = {"token", "role", "band", "tags", "maybe"}
+    plain = schemas(_engine(REDACT_SHAPES_APP))
+    redacted_eng = _engine(REDACT_SHAPES_APP, guard=Guardrails(redact_keys=keys))
+    assert schemas(redacted_eng) == plain
+    # and the nullability it advertises is the nullability set_widget honours
+    assert "null" not in json.dumps(plain["token"]) and "null" not in json.dumps(plain["role"])
+    assert "null" in json.dumps(plain["maybe"])
+    redacted_eng.set_widget("maybe", None)
+    redacted_eng.set_widget("band", [30, 70])
+    widgets = {w["identifier"]: w for w in redacted_eng.list_widgets()["widgets"]}
+    assert all(widgets[k]["redacted"] and "value" not in widgets[k] for k in keys)

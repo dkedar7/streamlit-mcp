@@ -46,10 +46,7 @@ class Engine:
 
     # --------------------------------------------------------------- reads
     def list_widgets(self) -> dict:
-        models = self._visible_widgets()
-        for m in models:
-            m["schema"] = tool_schema_for(m)
-        return {"widgets": models}
+        return {"widgets": self._visible_widgets(with_schema=True)}
 
     def get_layout(self) -> dict:
         snap = self.rt.snapshot()
@@ -89,11 +86,16 @@ class Engine:
         return self.read_output()
 
     # --------------------------------------------------------------- guards
-    def _visible_widgets(self, snapshot=None) -> list[dict]:
+    def _visible_widgets(self, snapshot=None, *, with_schema: bool = False) -> list[dict]:
         snap = snapshot if snapshot is not None else self.rt.snapshot()
         models = widgets_to_models(snap)
         if self.guard is not None and hasattr(self.guard, "filter_widgets"):
             models = self.guard.filter_widgets(models)
+        if with_schema:
+            # Before redaction: the schema reads the value's shape (nullable, range pair,
+            # multi-select), and a withheld value must not change what a write accepts (#193).
+            for m in models:
+                m["schema"] = tool_schema_for(m)
         # A widget keyed by a redacted name is still listed and drivable, but its current value
         # is withheld, like the session_state entry it mirrors (#191).
         for m in models:
