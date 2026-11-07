@@ -224,3 +224,32 @@ def test_redaction_leaves_every_schema_exactly_as_advertised_without_it():
     redacted_eng.set_widget("band", [30, 70])
     widgets = {w["identifier"]: w for w in redacted_eng.list_widgets()["widgets"]}
     assert all(widgets[k]["redacted"] and "value" not in widgets[k] for k in keys)
+
+
+# --- 0.10.2 #195: config never prints a server command that serve would refuse ---
+def test_config_refuses_a_public_http_host_without_a_token_like_serve_does(tmp_path, capsys):
+    from streamlit_mcp.server import serve
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, err = _config(capsys, str(app), "--transport", "http", "--host", "0.0.0.0")
+    assert rc == 1 and out == "" and "Refusing to serve http" in err
+    with pytest.raises(ValueError) as served:
+        serve(str(app), transport="http", host="0.0.0.0")
+    assert str(served.value) in err  # the same check, the same message
+
+
+def test_config_points_a_wildcard_bind_at_a_connectable_url(tmp_path, capsys):
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, err = _config(capsys, str(app), "--transport", "http", "--host", "0.0.0.0",
+                           "--bearer-token", "T")
+    assert rc == 0
+    assert json.loads(out)["mcpServers"]["streamlit-mcp"]["url"] == "http://127.0.0.1:8000/mcp"
+    assert "--host 0.0.0.0" in err and "this machine's address" in err  # serve still binds all
+
+
+def test_config_brackets_an_ipv6_host(tmp_path, capsys):
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, _ = _config(capsys, str(app), "--transport", "sse", "--host", "::1")
+    assert json.loads(out)["mcpServers"]["streamlit-mcp"]["url"] == "http://[::1]:8000/sse"

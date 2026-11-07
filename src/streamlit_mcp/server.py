@@ -200,6 +200,19 @@ def _load_app_semantic_tools(app_path: str) -> None:
         pass
 
 
+def check_bind(transport: str, host: str, has_token: bool) -> None:
+    """Refuse an unauthenticated HTTP/SSE server beyond loopback. ``serve`` enforces it, and
+    ``config`` applies the same check so it never prints a command ``serve`` would reject (#195)."""
+    if transport in ("http", "sse") and not has_token and host not in LOOPBACK_HOSTS:
+        # No token => requests are unauthenticated. Refuse to expose that beyond
+        # loopback; bind 127.0.0.1, or pass a bearer token to gate a public host.
+        raise ValueError(
+            f"Refusing to serve {transport} on non-loopback host {host!r} without a "
+            "bearer token: requests would be unauthenticated. Pass --bearer-token to bind "
+            "a non-loopback host, or use 127.0.0.1 / stdio."
+        )
+
+
 def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000, guard: Optional[Any] = None, session_ttl: Optional[float] = None,
           max_sessions: Optional[int] = None) -> None:
@@ -212,14 +225,7 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
     auth = None
     if transport in ("http", "sse"):
         auth = bearer_auth(guard)
-        if auth is None and host not in LOOPBACK_HOSTS:
-            # No token => requests are unauthenticated. Refuse to expose that beyond
-            # loopback; bind 127.0.0.1, or pass a bearer token to gate a public host.
-            raise ValueError(
-                f"Refusing to serve {transport} on non-loopback host {host!r} without a "
-                "bearer token: requests would be unauthenticated. Pass --bearer-token to bind "
-                "a non-loopback host, or use 127.0.0.1 / stdio."
-            )
+        check_bind(transport, host, auth is not None)
     _load_app_semantic_tools(app_path)
     mcp = build_server(app_path, guard=guard, auth=auth, session_ttl=session_ttl,
                        max_sessions=max_sessions)

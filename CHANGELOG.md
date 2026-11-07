@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.2 (2026-11-07)
+
+- **Fix:** `config` no longer prints wiring that `serve` refuses to start (#195). With
+  `--transport http|sse` on a non-loopback host and no `--bearer-token`, it printed a `serve`
+  command that fails closed. It now applies the same check as `serve`, through one shared
+  function, and exits 1 with the same message.
+- **Fix:** for a wildcard bind (`--host 0.0.0.0` or `::`), `config` gives the client
+  `http://127.0.0.1:…` rather than the unconnectable wildcard, and notes on stderr that a client
+  on another machine needs this machine's address. An IPv6 host is bracketed in the URL.
+
 ## 0.10.1 (2026-11-06)
 
 - **Fix:** redacting a widget no longer changes its advertised schema (#193). A widget's schema is

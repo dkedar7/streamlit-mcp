@@ -201,6 +201,23 @@ def _serve_args(args: argparse.Namespace, app: str) -> list[str]:
     return argv
 
 
+# Addresses a server binds to that a client can't connect to (#195).
+_WILDCARD_HOSTS = ("0.0.0.0", "::", "")
+
+
+def _client_url(host: str, port: int, transport: str) -> str:
+    """The URL a client dials for a server bound to ``host``. A wildcard bind listens on every
+    interface but isn't itself an address, so the client is pointed at loopback instead."""
+    if host in _WILDCARD_HOSTS:
+        print(f"note: the server binds every interface ({host or 'all'}); the URL below uses "
+              "127.0.0.1, so for a client on another machine replace it with this machine's "
+              "address", file=sys.stderr)
+        host = "127.0.0.1"
+    if ":" in host:  # an IPv6 literal must be bracketed in a URL
+        host = f"[{host}]"
+    return f"http://{host}:{port}/{'mcp' if transport == 'http' else 'sse'}"
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """Print ready-to-paste MCP client wiring for an app, with its path made absolute (#190).
 
@@ -218,10 +235,16 @@ def cmd_config(args: argparse.Namespace) -> int:
             return 0
         entry: dict = {"command": "uvx", "args": ["streamlit-mcp", *serve_argv]}
     else:
+        from .server import check_bind
+        try:
+            check_bind(args.transport, args.host, bool(args.bearer_token))
+        except ValueError as e:  # the serve command below would be refused; say so, print nothing
+            print(str(e), file=sys.stderr)
+            return 1
         # The client connects to a server you run yourself; print that command for reference.
         print("# start the server with: " + shlex.join(["uvx", "streamlit-mcp", *serve_argv]),
               file=sys.stderr)
-        url = f"http://{args.host}:{args.port}/{'mcp' if args.transport == 'http' else 'sse'}"
+        url = _client_url(args.host, args.port, args.transport)
         if args.client == "claude-desktop":
             print("Claude Desktop's config file only launches local stdio servers; use "
                   "--transport stdio, or add the URL as a custom connector in its settings.",
