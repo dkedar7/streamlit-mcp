@@ -93,6 +93,15 @@ def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "st
     # Without an explicit version FastMCP advertises its OWN in the initialize handshake, so a
     # client saw "3.4.5" where the CLI's --version said ours (#84).
     mcp = FastMCP(app_name, auth=auth, version=__version__)
+
+    @mcp.custom_route("/health", methods=["GET"])
+    @mcp.custom_route("/healthz", methods=["GET"])
+    async def health(request):
+        """Liveness for HTTP/SSE: answers 200 once the server accepts connections (#197). It sits
+        outside the bearer check, which guards only the MCP endpoint, so a probe needs no token;
+        it therefore says nothing a token would protect, not even the versions."""
+        from starlette.responses import JSONResponse
+        return JSONResponse({"status": "ok", "server": "streamlit-mcp"})
     sessions = SessionManager(lambda: AppTestRuntime(app_path), ttl=session_ttl,
                               max_sessions=max_sessions)
 

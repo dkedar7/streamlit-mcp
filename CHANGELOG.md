@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0 (2026-11-08)
+
+- **New:** `GET /health` (and `/healthz`) on `serve --transport http|sse` answers
+  `200 {"status": "ok", "server": "streamlit-mcp"}`, with or without `--bearer-token` (#197).
+  Until now there was no URL an orchestrator could probe for liveness: with a token set, `/mcp`
+  fails closed with 401. The endpoint is reachable without the token, so it deliberately
+  returns no app path, state or version numbers. Use `--version` or the MCP handshake for
+  versions. The MCP endpoint still requires the token.
+
 ## 0.10.2 (2026-11-07)
 
 - **Fix:** `config` no longer prints wiring that `serve` refuses to start (#195). With

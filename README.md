@@ -139,7 +139,8 @@ non-zero on an app exception (for CI/scripts).
   must send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool
   runs. A non-loopback host is allowed **only** with a token set; without one, `serve` binds
   `127.0.0.1` only and refuses a non-loopback host (fail closed). stdio is local and
-  unauthenticated.
+  unauthenticated. `GET /health` (or `/healthz`) answers `200 {"status": "ok"}` without a token,
+  for a liveness probe; it reveals nothing else.
 
 ## Known limitations
 
