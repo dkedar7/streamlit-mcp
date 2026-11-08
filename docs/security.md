@@ -8,6 +8,10 @@
   send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool runs. A
   non-loopback host is allowed **only** with a token set; without one, `serve` binds `127.0.0.1`
   only and refuses a non-loopback host (fail closed). stdio is local and unauthenticated.
+- **`GET /health` and `/healthz` need no token** on HTTP/SSE, so a container `HEALTHCHECK`, a
+  Kubernetes probe, or a script waiting for the server to come up gets a plain `200`. They return
+  only `{"status": "ok", "server": "streamlit-mcp"}`, with no app path, state or versions, so
+  leaving them open exposes nothing the token guards.
 
 ```bash
 # loopback, token required on every request
