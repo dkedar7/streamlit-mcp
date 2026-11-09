@@ -164,7 +164,7 @@ streamlit-mcp inspect app.py --layout --json # full layout (widgets, outputs, st
 streamlit-mcp call app.py --set "Name=agent" --click "Save" --read
 streamlit-mcp call app.py --read-only --set "Name=x"   # guardrail: blocked, exit 1
 streamlit-mcp call app.py --allow "Name" --set "Age=5"  # allow-list: 'Age' blocked, exit 1
-streamlit-mcp call app.py --redact access_token --state # that key is never printed
+streamlit-mcp call app.py --redact access_token --state # that key is dropped from state
 streamlit-mcp config app.py                  # MCP client config, app path made absolute
 streamlit-mcp --version
 ```

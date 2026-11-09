@@ -253,3 +253,29 @@ def test_config_brackets_an_ipv6_host(tmp_path, capsys):
     app.write_text("")
     rc, out, _ = _config(capsys, str(app), "--transport", "sse", "--host", "::1")
     assert json.loads(out)["mcpServers"]["streamlit-mcp"]["url"] == "http://[::1]:8000/sse"
+
+
+# --- 0.11.1 #199: what --redact promises matches what it does (state, not rendered output) ---
+RENDERS_SECRET_APP = SECRET_APP + "st.write('Token:', st.session_state['access_token'])\n"
+
+
+def test_redact_scrubs_state_but_not_what_the_app_renders():
+    """The documented boundary: if this ever starts scrubbing outputs, update the docs too."""
+    from streamlit_mcp.guardrails import Guardrails
+    eng = _engine(RENDERS_SECRET_APP, guard=Guardrails(redact_keys={"access_token"}))
+    out = eng.read_output()
+    assert SECRET not in json.dumps(out["session_state"])
+    assert SECRET in json.dumps(out["outputs"], default=str)
+
+
+def test_redact_docs_and_help_state_the_limitation(capsys):
+    from streamlit_mcp.cli import main
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "never leaves the server" not in readme
+    assert "not rendered output" in readme
+    with pytest.raises(SystemExit):
+        main(["call", "--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "on any read" not in help_text
+    assert "renders into an output is still returned" in help_text

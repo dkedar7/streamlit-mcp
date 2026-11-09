@@ -380,8 +380,9 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
     p.add_argument("--allow", action="append",
                    help="allow-list a widget identifier (repeatable)")
     p.add_argument("--redact", action="append", metavar="KEY",
-                   help="never return this session_state key's value, on any read "
-                        "(repeatable; e.g. a token the app stores after login)")
+                   help="scrub this session_state key from every read (repeatable; e.g. a token "
+                        "the app stores after login). Filters state only: a value the app "
+                        "renders into an output is still returned")
     if bearer:
         p.add_argument("--bearer-token", dest="bearer_token",
                        help="require this bearer token on HTTP/SSE (enforced — 401 if the "

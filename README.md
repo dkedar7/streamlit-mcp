@@ -133,8 +133,10 @@ non-zero on an app exception (for CI/scripts).
 - **`app_path` is executed as trusted code** in the server process (that's how AppTest
   runs it). Only serve apps you trust.
 - **`get_state` / `read_output` expose the app's `session_state`** to the caller. If the app
-  keeps something sensitive there (a token stored after login, say), pass `--redact <key>` and
-  that key never leaves the server.
+  keeps something sensitive there (a token stored after login, say), pass `--redact <key>` to
+  scrub it from `session_state` on every read. It filters state, not rendered output: if the
+  app itself displays the value (`st.write(st.session_state["token"])`), that text is still
+  returned in `outputs`. See [docs/security.md](docs/security.md).
 - **HTTP/SSE bearer auth is enforced.** Pass `--bearer-token <T>` and every HTTP/SSE request
   must send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool
   runs. A non-loopback host is allowed **only** with a token set; without one, `serve` binds
