@@ -3,7 +3,8 @@
 - **`app_path` is executed as trusted code** in the server process (that's how `AppTest` runs
   it). Only serve apps you trust.
 - **`get_state` / `read_output` expose the app's `session_state`** to the caller. If the app
-  keeps something sensitive there, `--redact <key>` keeps it on the server (see below).
+  keeps something sensitive there, `--redact <key>` scrubs it from `session_state` on every read. It does not
+  scrub a value the app renders into an output (see below).
 - **HTTP/SSE bearer auth is enforced.** Pass `--bearer-token <T>` and every HTTP/SSE request must
   send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool runs. A
   non-loopback host is allowed **only** with a token set; without one, `serve` binds `127.0.0.1`
@@ -32,8 +33,10 @@ can't be set or clicked, **and its value is filtered out of every `session_state
 be sidestepped by reading state directly. App state that isn't a widget (counters, flags an app
 stashes in `session_state`) is preserved.
 
-`--redact <key>` (repeatable) keeps a `session_state` key's value off every read: `get_state`,
-`read_output`, `get_layout` and the state a write returns, on the CLI and over MCP. Use it for
+`--redact <key>` (repeatable) scrubs a `session_state` key's value from the state on every read:
+`get_state`, `read_output`, `get_layout` and the state a write returns, on the CLI and over MCP.
+It filters state, not rendered output: if the app displays the value itself, that text is still
+returned in `outputs` (see the limitation below). Use it for
 what an app stores itself, such as a token from a login flow; `--allow` can't hide that, because
 it deliberately keeps app state that isn't a widget. Redacting a widget's key also withholds the
 widget's value in `list_widgets`/`get_layout` (it's marked `"redacted": true`), but the widget

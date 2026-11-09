@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1 (2026-11-09)
+
+- **Docs:** the README and `--redact`'s `--help` no longer overpromise (#199). They said a
+  redacted key "never leaves the server" and is withheld "on any read", but `--redact` scrubs
+  `session_state` only: if the app renders the value into an output, `read_output`/`get_layout`
+  still return that text. `docs/security.md` already stated this limitation; the README (the
+  PyPI page) and `--help` now say the same. Behavior is unchanged.
+
 ## 0.11.0 (2026-11-08)
 
 - **New:** `GET /health` (and `/healthz`) on `serve --transport http|sse` answers
