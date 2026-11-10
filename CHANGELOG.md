@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 (2026-11-10)
+
+- **New:** `serve` prints a startup status block to stderr (#201): the app path, the transport
+  with its connect URL and, for HTTP/SSE, the `/health` URL, whether a bearer token is required,
+  and the active guardrails (read-only, allow-list, redacted keys). It is built from the guard
+  the engine enforces, so it shows what actually took effect, and it never prints the token.
+  stdout is untouched, so stdio's JSON-RPC channel stays clean.
+- **Fix:** a `--bearer-token` passed with the stdio transport was silently ignored (#146). The
+  status block now says it has no effect there and to use `--transport http` or `sse`.
+- `config` and the status block share one URL helper, so they agree on where the server is.
+
 ## 0.11.1 (2026-11-09)
 
 - **Docs:** the README and `--redact`'s `--help` no longer overpromise (#199). They said a

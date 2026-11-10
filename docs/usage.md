@@ -175,6 +175,15 @@ into the server command. With `--transport http` (or `sse`) it prints the URL wi
 including the `Authorization` header when you pass `--bearer-token`, and prints the `serve` command
 to start the server on stderr.
 
+`serve` prints its effective posture to stderr when it starts:
+
+```
+streamlit-mcp 0.12.0 (streamlit 1.67.0)  serving /abs/path/app.py
+  transport:  http  http://127.0.0.1:8000/mcp   health: http://127.0.0.1:8000/health
+  auth:       bearer token required
+  guardrails: read-only; redacting: access_token
+```
+
 A `--set` value is JSON-parsed for typed widgets (so `Age=5` is a number, `Tags=["a","b"]` a
 list, `Agree=true` a boolean), but for a `text_input`/`text_area` it's stored **literally** — so
 `Comment=true` is the string `"true"`, not the boolean — matching what the same value stores over
