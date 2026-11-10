@@ -9,6 +9,9 @@
   send `Authorization: Bearer <T>` — a missing or wrong token gets `401` before any tool runs. A
   non-loopback host is allowed **only** with a token set; without one, `serve` binds `127.0.0.1`
   only and refuses a non-loopback host (fail closed). stdio is local and unauthenticated.
+- **`serve` prints its effective auth and guardrails to stderr at startup**, built from the same
+  guard the engine enforces, so you can confirm the flags took effect. A `--bearer-token` given with
+  stdio is reported as having no effect (#146). The token is never printed.
 - **`GET /health` and `/healthz` need no token** on HTTP/SSE, so a container `HEALTHCHECK`, a
   Kubernetes probe, or a script waiting for the server to come up gets a plain `200`. They return
   only `{"status": "ok", "server": "streamlit-mcp"}`, with no app path, state or versions, so

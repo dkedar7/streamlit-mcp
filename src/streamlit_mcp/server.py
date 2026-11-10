@@ -8,6 +8,7 @@ plan's deferred open question; the isolation machinery itself is complete and te
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Optional
 
 from fastmcp import FastMCP
@@ -33,6 +34,66 @@ TOOL_NAMES = (
 
 VALID_TRANSPORTS = ("stdio", "http", "sse")
 LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+# Addresses a server binds to that a client can't connect to (#195).
+WILDCARD_HOSTS = ("0.0.0.0", "::", "")
+
+
+def version_string() -> str:
+    """Ours plus the installed Streamlit's: Streamlit's version governs AppTest's behaviour (the
+    st.form change in #151 arrived with a Streamlit upgrade), so a bug report needs both (#167)."""
+    try:
+        from importlib.metadata import version
+        return f"streamlit-mcp {__version__} (streamlit {version('streamlit')})"
+    except Exception:
+        return f"streamlit-mcp {__version__}"
+
+
+def client_url(host: str, port: int, path: str) -> str:
+    """The URL a client dials for a server bound to ``host``. A wildcard bind listens on every
+    interface but isn't itself an address, so it maps to loopback. ``config`` and the ``serve``
+    status line both use this, so they can't disagree about where the server is (#195, #201)."""
+    if host in WILDCARD_HOSTS:
+        host = "127.0.0.1"
+    if ":" in host:  # an IPv6 literal must be bracketed in a URL
+        host = f"[{host}]"
+    return f"http://{host}:{port}/{path}"
+
+
+def startup_status(app_path: str, transport: str, host: str, port: int,
+                   guard: Optional[Any]) -> str:
+    """What ``serve`` is about to run, with the guardrails and auth it actually applies (#201).
+
+    Built from the same guard object the engine enforces, so it reports the effective posture
+    rather than echoing the flags. Never includes the token itself."""
+    import os
+    token = getattr(guard, "bearer_token", None)
+    lines = [f"{version_string()}  serving {os.path.abspath(app_path)}"]
+    if transport == "stdio":
+        lines.append("  transport:  stdio (local, unauthenticated)")
+        if token:  # #146: the token is accepted but there's no HTTP request to check it on
+            lines.append("  auth:       none: --bearer-token has no effect on stdio; "
+                         "use --transport http or sse to require it")
+        else:
+            lines.append("  auth:       none (stdio is local)")
+    else:
+        url = client_url(host, port, "mcp" if transport == "http" else "sse")
+        lines.append(f"  transport:  {transport}  {url}   health: {client_url(host, port, 'health')}")
+        if host in WILDCARD_HOSTS:
+            lines.append(f"              (bound to every interface ({host or 'all'}); remote "
+                         "clients use this machine's address)")
+        lines.append("  auth:       bearer token required" if token else
+                     "  auth:       none (loopback only; pass --bearer-token to require one)")
+    rails = []
+    if guard is not None and getattr(guard, "read_only", False):
+        rails.append("read-only")
+    allow = getattr(guard, "allow_list", None)
+    if allow is not None:
+        rails.append(f"allow-list: {', '.join(sorted(allow)) or '(empty)'}")
+    redact = getattr(guard, "redact_keys", None)
+    if redact:
+        rails.append(f"redacting: {', '.join(sorted(redact))}")
+    lines.append(f"  guardrails: {'; '.join(rails) or 'none'}")
+    return "\n".join(lines)
 
 
 def bearer_auth(guard: Optional[Any]):
@@ -238,6 +299,8 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
     _load_app_semantic_tools(app_path)
     mcp = build_server(app_path, guard=guard, auth=auth, session_ttl=session_ttl,
                        max_sessions=max_sessions)
+    # stderr only: under stdio, stdout is the JSON-RPC channel.
+    print(startup_status(app_path, transport, host, port, guard), file=sys.stderr, flush=True)
     if transport == "stdio":
         mcp.run()
     else:

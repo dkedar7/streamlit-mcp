@@ -143,6 +143,10 @@ non-zero on an app exception (for CI/scripts).
   `127.0.0.1` only and refuses a non-loopback host (fail closed). stdio is local and
   unauthenticated. `GET /health` (or `/healthz`) answers `200 {"status": "ok"}` without a token,
   for a liveness probe; it reveals nothing else.
+- **`serve` reports what it's enforcing.** On startup it prints a short block to stderr (stdout
+  stays the JSON-RPC channel): the app, the transport with its connect and `/health` URLs, whether
+  a bearer token is required, and the active guardrails. A `--bearer-token` passed with stdio is
+  called out as having no effect. The token itself is never printed.
 
 ## Known limitations
 

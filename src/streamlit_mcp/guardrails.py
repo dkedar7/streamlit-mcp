@@ -3,7 +3,7 @@
 Four controls (origin R11):
   - read-only mode      -> reject state-changing tools (set_widget / click)
   - allow-list          -> only listed widgets are visible / settable
-  - redact              -> named session_state keys never leave the server (#191)
+  - redact              -> named session_state keys are scrubbed from state on every read (#191, #199)
   - bearer token        -> gate the HTTP/SSE transport (stdio is local, no token)
 
 The engine consults ``can_write`` / ``is_allowed`` / ``filter_widgets`` / ``is_redacted`` so both surfaces

@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from . import __version__
 from .decorator import registered_semantic_tools
 from .engine import Engine, guard_semantic_tool
 from .guardrails import Guardrails
@@ -201,21 +200,14 @@ def _serve_args(args: argparse.Namespace, app: str) -> list[str]:
     return argv
 
 
-# Addresses a server binds to that a client can't connect to (#195).
-_WILDCARD_HOSTS = ("0.0.0.0", "::", "")
-
-
 def _client_url(host: str, port: int, transport: str) -> str:
-    """The URL a client dials for a server bound to ``host``. A wildcard bind listens on every
-    interface but isn't itself an address, so the client is pointed at loopback instead."""
-    if host in _WILDCARD_HOSTS:
+    """The URL a client dials for a server bound to ``host`` (shared with serve's status line)."""
+    from .server import WILDCARD_HOSTS, client_url
+    if host in WILDCARD_HOSTS:
         print(f"note: the server binds every interface ({host or 'all'}); the URL below uses "
               "127.0.0.1, so for a client on another machine replace it with this machine's "
               "address", file=sys.stderr)
-        host = "127.0.0.1"
-    if ":" in host:  # an IPv6 literal must be bracketed in a URL
-        host = f"[{host}]"
-    return f"http://{host}:{port}/{'mcp' if transport == 'http' else 'sse'}"
+    return client_url(host, port, "mcp" if transport == "http" else "sse")
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -365,13 +357,8 @@ def cmd_call(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------- parser
 def _version_string() -> str:
-    """Ours plus the installed Streamlit's: Streamlit's version governs AppTest's behaviour (the
-    st.form change in #151 arrived with a Streamlit upgrade), so a bug report needs both (#167)."""
-    try:
-        from importlib.metadata import version
-        return f"streamlit-mcp {__version__} (streamlit {version('streamlit')})"
-    except Exception:
-        return f"streamlit-mcp {__version__}"
+    from .server import version_string
+    return version_string()
 
 
 def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
