@@ -765,7 +765,7 @@ ACCESSOR_APP = (
     "box = st.container()\n"
     "box.download_button('DL', data='x')\n"
     "tab1, = st.tabs(['T'])\n"
-    "tab1.data_editor({'a': [1, 2]})\n"
+    "tab1.link_button('L', 'https://example.com')\n"
     "sl.chat_input('Aliased')\n"
     "st.dataframe({'b': [3]})\n"                      # a plain OUTPUT — must not be reported
     "# st.pills('commented out', ['x'])\n"            # a comment — must not be reported
@@ -779,7 +779,7 @@ def test_accessor_placed_unsupported_widgets_are_reported():
     from `unsupported` on every surface, breaking the headline guarantee (#52)."""
     from streamlit_mcp.elements import detect_unsupported_source
     found = {u["element"] for u in detect_unsupported_source(ACCESSOR_APP)}
-    assert {"file_uploader", "camera_input", "download_button", "data_editor"} <= found
+    assert {"file_uploader", "camera_input", "download_button", "link_button"} <= found
     assert "chat_input" in found  # reached through an aliased import, too
 
 
@@ -789,7 +789,7 @@ def test_source_scan_ignores_comments_strings_and_plain_outputs():
     found = {u["element"] for u in detect_unsupported_source(ACCESSOR_APP)}
     assert "pills" not in found        # commented out
     assert "audio_input" not in found  # inside a string literal
-    assert "dataframe" not in found    # st.dataframe is a supported output, not st.data_editor
+    assert "dataframe" not in found    # st.dataframe is a supported output
 
 
 def test_unsupported_agrees_across_every_surface(tmp_path, capsys):
