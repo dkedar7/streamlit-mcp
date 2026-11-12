@@ -251,6 +251,11 @@ def cmd_config(args: argparse.Namespace) -> int:
         entry = {"url": url}
         if args.bearer_token:
             entry["headers"] = {"Authorization": f"Bearer {args.bearer_token}"}
+    if args.client == "vscode":
+        # VS Code's .vscode/mcp.json keys servers under "servers" and needs an explicit "type";
+        # it silently ignores an mcpServers block (#203). The entry itself is the same.
+        print(json.dumps({"servers": {args.name: {"type": args.transport, **entry}}}, indent=2))
+        return 0
     print(json.dumps({"mcpServers": {args.name: entry}}, indent=2))
     return 0
 
@@ -402,10 +407,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser(
         "config", help="print MCP client config for an app (its path made absolute)")
     p_config.add_argument("app")
-    p_config.add_argument("--client", choices=["generic", "claude-desktop", "cursor", "claude-code"],
+    p_config.add_argument("--client", choices=["generic", "claude-desktop", "cursor", "claude-code",
+                                                    "vscode"],
                           default="generic",
-                          help="claude-code prints a `claude mcp add` command; the others print "
-                               "an mcpServers JSON block (default: generic)")
+                          help="claude-code prints a `claude mcp add` command; vscode prints a "
+                               ".vscode/mcp.json `servers` block; the others print an "
+                               "mcpServers JSON block (default: generic)")
     p_config.add_argument("--name", default="streamlit-mcp", help="server name in the client")
     p_config.add_argument("--transport", choices=["stdio", "http", "sse"], default="stdio")
     p_config.add_argument("--host", default="127.0.0.1")

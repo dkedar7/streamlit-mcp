@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 (2026-11-12)
+
+- **New:** `config --client vscode` prints a `.vscode/mcp.json` block (#203). VS Code reads a
+  `servers` key with an explicit `type` (`stdio`, `http` or `sse`) and silently ignores the
+  `mcpServers` block the other clients use, so the generic output never loaded there. The server
+  command, URL, bearer header, guardrail flags and bind check are the same as for every client.
+
 ## 0.12.0 (2026-11-10)
 
 - **New:** `serve` prints a startup status block to stderr (#201): the app path, the transport

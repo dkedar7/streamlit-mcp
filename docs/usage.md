@@ -170,7 +170,8 @@ streamlit-mcp --version
 ```
 
 `config` prints an `mcpServers` JSON block for Claude Desktop, Cursor and similar clients, or with
-`--client claude-code` a `claude mcp add` command. It carries `--read-only`/`--allow`/`--redact`
+`--client claude-code` a `claude mcp add` command, or with `--client vscode` a `.vscode/mcp.json`
+`servers` block (VS Code ignores `mcpServers`). It carries `--read-only`/`--allow`/`--redact`
 into the server command. With `--transport http` (or `sse`) it prints the URL wiring instead,
 including the `Authorization` header when you pass `--bearer-token`, and prints the `serve` command
 to start the server on stderr.
