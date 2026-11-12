@@ -279,3 +279,34 @@ def test_redact_docs_and_help_state_the_limitation(capsys):
     help_text = " ".join(capsys.readouterr().out.split())
     assert "on any read" not in help_text
     assert "renders into an output is still returned" in help_text
+
+
+# --- #203: VS Code reads `servers` with an explicit `type`, not `mcpServers` ---
+def test_config_for_vscode_stdio(tmp_path, capsys):
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, _ = _config(capsys, str(app), "--client", "vscode", "--name", "demo", "--read-only")
+    assert rc == 0
+    assert json.loads(out) == {"servers": {"demo": {
+        "type": "stdio", "command": "uvx",
+        "args": ["streamlit-mcp", "serve", str(app.resolve()), "--read-only"]}}}
+
+
+@pytest.mark.parametrize("transport,path", [("http", "mcp"), ("sse", "sse")])
+def test_config_for_vscode_http_and_sse(tmp_path, capsys, transport, path):
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, err = _config(capsys, str(app), "--client", "vscode", "--transport", transport,
+                           "--port", "9000", "--bearer-token", "T")
+    assert rc == 0 and "streamlit-mcp serve" in err
+    assert json.loads(out) == {"servers": {"streamlit-mcp": {
+        "type": transport, "url": f"http://127.0.0.1:9000/{path}",
+        "headers": {"Authorization": "Bearer T"}}}}
+
+
+def test_config_for_vscode_keeps_the_bind_check(tmp_path, capsys):
+    app = tmp_path / "app.py"
+    app.write_text("")
+    rc, out, err = _config(capsys, str(app), "--client", "vscode", "--transport", "http",
+                           "--host", "0.0.0.0")
+    assert rc == 1 and out == "" and "Refusing to serve http" in err

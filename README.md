@@ -66,9 +66,23 @@ by opting in with one `with` block (`from streamlit_mcp.live import live`). See 
 claude mcp add streamlit-mcp -- uvx streamlit-mcp serve /absolute/path/to/your/app.py
 ```
 
+**VS Code** uses a different schema in `.vscode/mcp.json`: a `servers` key and an explicit `type`.
+
+```json
+{
+  "servers": {
+    "streamlit-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["streamlit-mcp", "serve", "/absolute/path/to/your/app.py"]
+    }
+  }
+}
+```
+
 The app path must be absolute, because the client starts the server from its own directory.
 `streamlit-mcp config app.py` prints the block above with the path filled in
-(`--client claude-code` prints the `claude mcp add` line instead).
+(`--client claude-code` prints the `claude mcp add` line, `--client vscode` the VS Code block).
 
 `uvx` runs the published package with no prior install. stdio (the default) is the right
 transport for local clients.
