@@ -11,6 +11,7 @@ click buttons (each triggers a rerun), and read the rendered element tree + sess
 from __future__ import annotations
 
 import contextlib
+import copy
 import datetime
 import io
 import json
@@ -53,7 +54,13 @@ SUPPORTED_KINDS = (
     "pills",
     "segmented_control",
     "feedback",
+    "data_editor",
 )
+
+# st.data_editor has no typed accessor before ~1.67 and arrives as a `dataframe` node either way;
+# what separates it from a read-only st.dataframe is the proto's editing_mode (#204).
+_EDITABLE_MODES = ("FIXED", "DYNAMIC")
+_EMPTY_EDITS = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
 
 # st.pills and st.segmented_control are the SAME element in the tree — both arrive typed
 # `button_group`, which is why they were once written off as undetectable — but AppTest exposes
@@ -158,6 +165,9 @@ class WidgetSnapshot:
     disabled: bool = False
     # The st.form this widget belongs to (a field, or the form's submit button); None outside one.
     form: Optional[str] = None
+    # data_editor only: its column names, and whether rows can be added/deleted (num_rows="dynamic").
+    columns: Optional[list] = None
+    dynamic: Optional[bool] = None
 
 
 @dataclass
@@ -202,11 +212,17 @@ class AppTestRuntime:
         # Writes to st.form fields that are waiting for that form's submit click:
         # form id -> {widget id -> value}. See _hold_for_submit.
         self._pending_forms: dict[str, dict[str, Any]] = {}
+        # Applied st.data_editor edits, by session_state key: {edited_rows, added_rows, deleted_rows}.
+        # Re-asserted before every run, because whether AppTest keeps this state across reruns
+        # depends on the Streamlit version (1.58 drops it, 1.67 keeps it). See _edit_table.
+        self._table_edits: dict[str, dict] = {}
 
     def _run_script(self) -> None:
         """Run the app, keeping its stdout output (tracebacks, print) off our stdout. Uses a
         generous timeout — AppTest's 3s default spuriously trips for a slow app or a loaded CI
         box; a real app run finishes in well under a second."""
+        for state_key, edits in self._table_edits.items():
+            self.at.session_state[state_key] = copy.deepcopy(edits)
         with _stdout_to_stderr():
             self.at.run(timeout=30)
 
@@ -248,10 +264,42 @@ class AppTestRuntime:
                 # An unrecognized button_group (a future widget on the same proto) maps to None and
                 # falls through as unsupported, rather than being driven under the wrong kind.
                 kind = overrides.get(self._widget_id(el))
+            elif kind == "dataframe" and self._editing_mode(el) in _EDITABLE_MODES:
+                kind = "data_editor"
             if kind in supported:
                 idx = kind_index.get(kind, 0)
                 kind_index[kind] = idx + 1
                 yield kind, idx, el
+
+    @staticmethod
+    def _editing_mode(el) -> Optional[str]:
+        """A dataframe node's editing mode by enum NAME (READ_ONLY / FIXED / DYNAMIC), else None."""
+        proto = getattr(el, "proto", None)
+        try:
+            field = proto.DESCRIPTOR.fields_by_name["editing_mode"]
+            return field.enum_type.values_by_number[proto.editing_mode].name
+        except Exception:
+            return None
+
+    @staticmethod
+    def _table_rows(el) -> list:
+        """The editor's ORIGINAL rows as JSON records. AppTest only ever holds the data the app
+        passed in: the edited table exists solely as st.data_editor's return value inside the app,
+        so it is not reported here rather than re-derived (that would re-implement Streamlit)."""
+        import json
+        df = getattr(el, "value", None)
+        try:
+            return json.loads(df.to_json(orient="records", date_format="iso"))
+        except Exception:
+            return []
+
+    def _state_key(self, el) -> str:
+        """Where an editor's edit state lives in session_state: its key, else its widget id."""
+        return getattr(el, "key", None) or self._widget_id(el)
+
+    def _editor_value(self, el, pending: dict) -> dict:
+        edits = pending.get(self._widget_id(el)) or self._table_edits.get(self._state_key(el))
+        return {"rows": self._table_rows(el), "edits": copy.deepcopy(edits or _EMPTY_EDITS)}
 
     @staticmethod
     def _widget_id(el) -> Optional[str]:
@@ -323,7 +371,8 @@ class AppTestRuntime:
                 key=getattr(el, "key", None),
                 label=getattr(el, "label", None),
                 # A form field shows what was typed into it even before Submit, as in a browser.
-                value=pending.get(self._widget_id(el), getattr(el, "value", None)),
+                value=(self._editor_value(el, pending) if kind == "data_editor"
+                       else pending.get(self._widget_id(el), getattr(el, "value", None))),
                 options=list(getattr(el, "options", []) or []) or None,
                 # A feedback widget carries no min/max of its own; its bounds are the option count
                 # implied by its style, so they're derived and advertised like any other range.
@@ -337,12 +386,17 @@ class AppTestRuntime:
                 # Which submit sends this field: without it an agent driving a multi-form app has
                 # to guess, and a wrong guess silently discards the held fields (#189).
                 form=self._form_id(el) or None,
+                columns=([str(c) for c in getattr(el.value, "columns", [])]
+                         if kind == "data_editor" else None),
+                dynamic=(self._editing_mode(el) == "DYNAMIC") if kind == "data_editor" else None,
             )
             for kind, idx, el in self._iter_widgets()
         ]
         outputs: list[OutputSnapshot] = []
         for el in self._walk():
             kind = getattr(el, "type", None)
+            if kind == "dataframe" and self._editing_mode(el) in _EDITABLE_MODES:
+                continue  # an editor is a widget now, not an anonymous dataframe output (#128)
             if kind in output_kinds:
                 text = self._output_text(kind, el)
                 if text is not None:
@@ -548,6 +602,9 @@ class AppTestRuntime:
         kind, el = self._find(identifier)
         if kind == "button":
             raise RuntimeError_(f"{identifier!r} is a button; use click()")
+        if kind == "data_editor":
+            self._edit_table(identifier, el, value)
+            return
         coerced = self._coerce(kind, value, el)
         form = self._form_id(el)
         if form:
@@ -659,6 +716,111 @@ class AppTestRuntime:
                 f"created with value=None / index=None).{hint}"
             )
 
+    _EDIT_OPS = ("edit", "add", "delete")
+
+    def _edit_table(self, identifier: str, el, value: Any) -> None:
+        """Apply ``{"edit": {row: {col: v}}, "add": [{col: v}], "delete": [row]}`` to a data_editor
+        (#204), or reset it to the app's data with null.
+
+        AppTest has no set_value for the editor; its documented route is the edit state Streamlit
+        itself uses ({edited_rows, added_rows, deleted_rows} in session_state), which the app then
+        applies. Row numbers are positions in the app's ORIGINAL data, as in that protocol; row
+        ``n + i`` edits the i-th added row. Edits accumulate, like a browser user's. Everything is
+        validated before anything is written, so a bad op leaves the table as it was."""
+        import json
+        if isinstance(value, str):  # the CLI hands over the raw --set text
+            try:
+                value = json.loads(value)
+            except ValueError:
+                pass
+        n_rows = len(self._table_rows(el))
+        columns = [str(c) for c in getattr(el.value, "columns", [])]
+        dynamic = self._editing_mode(el) == "DYNAMIC"
+        state_key, form = self._state_key(el), self._form_id(el)
+        held = self._pending_forms.get(form, {}).get(self._widget_id(el)) if form else None
+        base = copy.deepcopy(held or self._table_edits.get(state_key) or _EMPTY_EDITS)
+        if value is None:
+            merged = copy.deepcopy(_EMPTY_EDITS)
+        else:
+            merged = self._merge_edits(identifier, value, base, n_rows, columns, dynamic)
+        if form:  # held until the form's submit, like any other form field
+            self._hold_for_submit(form, el, merged)
+            return
+        prior = self._table_edits.get(state_key)
+        self._table_edits[state_key] = merged
+        try:
+            self._run_script()
+        except Exception as e:
+            self._table_edits[state_key] = prior or copy.deepcopy(_EMPTY_EDITS)
+            try:
+                self._run_script()
+            except Exception:
+                pass
+            raise RuntimeError_(f"editing {identifier!r} failed and was rolled back: {e}") from e
+
+    def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic) -> dict:
+        usage = (f'data_editor {identifier!r} takes {{"edit": {{row: {{column: value}}}}, '
+                 f'"add": [{{column: value}}], "delete": [row]}}, or null to reset')
+        if not isinstance(value, dict) or not value or set(value) - set(self._EDIT_OPS):
+            raise RuntimeError_(usage)
+        n_total = n_rows + len(base["added_rows"])
+
+        def row_of(r) -> int:
+            if isinstance(r, bool):
+                raise RuntimeError_(f"{r!r} is not a row number; {usage}")
+            try:
+                i = int(r)
+            except (TypeError, ValueError):
+                raise RuntimeError_(f"{r!r} is not a row number; {usage}") from None
+            if str(i) != str(r).strip():
+                raise RuntimeError_(f"{r!r} is not a row number; {usage}")
+            if not 0 <= i < n_total:
+                raise RuntimeError_(f"row {i} is out of range for {identifier!r}: "
+                                    f"it has rows 0-{n_total - 1}")
+            return i
+
+        def cells(d, where) -> dict:
+            if not isinstance(d, dict):
+                raise RuntimeError_(f"{where} must be an object of column: value; {usage}")
+            unknown = [c for c in d if c not in columns]
+            if unknown:
+                raise RuntimeError_(f"unknown column(s) {unknown} in {where}; "
+                                    f"{identifier!r} has columns {columns}")
+            return dict(d)
+
+        edit, add, delete = (value.get(op) for op in self._EDIT_OPS)
+        if edit is not None and not isinstance(edit, dict):
+            raise RuntimeError_(usage)
+        if add is not None and not isinstance(add, list):
+            raise RuntimeError_(usage)
+        if delete is not None and not isinstance(delete, list):
+            raise RuntimeError_(usage)
+        if (add or delete) and not dynamic:
+            raise RuntimeError_(f"{identifier!r} has a fixed set of rows (the app did not pass "
+                                'num_rows="dynamic"), so rows can\'t be added or deleted')
+        merged = copy.deepcopy(base)
+        for r, changes in (edit or {}).items():
+            i = row_of(r)
+            changes = cells(changes, f"edit of row {r}")
+            if i < n_rows:
+                if i in merged["deleted_rows"]:
+                    raise RuntimeError_(f"row {i} of {identifier!r} was deleted")
+                merged["edited_rows"].setdefault(i, {}).update(changes)
+            else:
+                merged["added_rows"][i - n_rows].update(changes)
+        for j, row in enumerate(add or []):
+            merged["added_rows"].append(cells(row, f"added row {j}"))
+        for r in delete or []:
+            i = row_of(r)
+            if i >= n_rows:
+                raise RuntimeError_(f"row {i} of {identifier!r} is an added row; only the app's "
+                                    "own rows can be deleted (reset with null to drop added rows)")
+            if i not in merged["deleted_rows"]:
+                merged["deleted_rows"].append(i)
+                merged["edited_rows"].pop(i, None)
+        merged["deleted_rows"].sort()
+        return merged
+
     def click(self, identifier: str) -> None:
         kind, el = self._find(identifier)
         if kind != "button":
@@ -671,7 +833,10 @@ class AppTestRuntime:
             for k, _, w in self._iter_widgets():
                 wid = self._widget_id(w)
                 if wid in held:
-                    self._set(k, w, held[wid])
+                    if k == "data_editor":
+                        self._table_edits[self._state_key(w)] = held[wid]
+                    else:
+                        self._set(k, w, held[wid])
         el.click()
         self._run_script()
 

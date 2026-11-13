@@ -48,11 +48,23 @@ columns, keeps the app's column names. `--read` prints the summary; `--json` and
 
 Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
 `selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,
-`time_input`, `color_picker`, `pills`, `segmented_control`, `feedback`. Input widgets
-streamlit-mcp can't drive (`file_uploader`, `camera_input`, `audio_input`, `chat_input`,
-`data_editor`, …) are reported explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
+`time_input`, `color_picker`, `pills`, `segmented_control`, `feedback`, `data_editor`. Input widgets
+streamlit-mcp can't drive (`file_uploader`, `camera_input`, `audio_input`, `chat_input`, …) are reported explicitly on every surface (text `--layout`, `--json`, and MCP `get_layout`), never silently
 dropped — wherever they're placed, including `st.sidebar.file_uploader(...)` and inside columns,
 tabs and containers.
+
+An `st.data_editor` is driven with edits in Streamlit's own protocol:
+
+```bash
+streamlit-mcp call app.py --set 'cart={"edit": {"0": {"qty": 5}}, "add": [{"qty": 9, "price": 3}], "delete": [1]}' --read
+```
+
+Row numbers are positions in the app's original data, and row `n + i` is the i-th added row.
+Edits accumulate, and `null` resets the table. Adding or deleting rows needs
+`num_rows="dynamic"` (advertised as `constraints.dynamic`), and an unknown column or row is
+rejected without changing anything. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
+AppTest never holds the edited table, so read the result from what the app renders. Inside an
+`st.form`, edits are held until the submit, like any other field.
 
 !!! note "Range widgets"
     A `slider`, `select_slider` or `date_input` built with a tuple `value=` is a **two-handle

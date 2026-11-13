@@ -26,7 +26,7 @@ ACTION_KINDS = ("button",)
 # AppTest exposes each under its own typed accessor with a working set_value, even though pills and
 # segmented_control share the `button_group` protobuf name in the element tree. They are supported
 # kinds now (see runtime.BUTTON_GROUP_KINDS); what remains below genuinely cannot be driven —
-# file/camera/audio input need a binary upload, data_editor exposes no setter, and
+# file/camera/audio input need a binary upload, and
 # download/link/page_link are navigation with no state to set.
 #
 # form_submit_button is deliberately NOT here: AppTest renders it as a `button`-typed node, so the
@@ -41,7 +41,6 @@ UNSUPPORTED_ELEMENTS = (
     "audio_input",
     "chat_input",
     "chat_message",
-    "data_editor",
     "download_button",
     "link_button",
     "page_link",
@@ -81,6 +80,9 @@ def _constraints(w: WidgetSnapshot) -> dict:
             c[name] = serialize_value(val)
     if w.data_type == "INT":
         c["integer"] = True  # the proto's declared type, not the current value's (see #161)
+    if w.kind == "data_editor":
+        c["columns"] = list(w.columns or [])
+        c["dynamic"] = bool(w.dynamic)  # whether rows can be added/deleted
     return c
 
 
@@ -257,6 +259,19 @@ def tool_schema_for(model: dict) -> dict:
         value = {"type": "string"}
     elif kind == "button":
         return {"type": "object", "properties": {}, "description": "click action; no value"}
+    elif kind == "data_editor":
+        # Edits in Streamlit's own protocol; row numbers are positions in the app's original data.
+        cols = list(c.get("columns", []))
+        cell = {"type": "object", "propertyNames": {"enum": cols}}
+        ops: dict = {"edit": {"type": "object", "additionalProperties": cell,
+                              "description": "row number -> {column: new value}"}}
+        if c.get("dynamic"):
+            ops["add"] = {"type": "array", "items": cell, "description": "rows to append"}
+            ops["delete"] = {"type": "array", "items": {"type": "integer", "minimum": 0},
+                             "description": "original row numbers to delete"}
+        value = {"type": ["object", "null"], "properties": ops, "additionalProperties": False,
+                 "description": "edits accumulate; null resets the table to the app's data"}
+        return {"type": "object", "properties": {"value": value}, "required": ["value"]}
     else:
         value = {}
     if is_range_widget(model):
