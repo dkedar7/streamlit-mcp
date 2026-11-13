@@ -64,8 +64,10 @@ look-but-don't-touch surface, including the higher-level action layer.
   session (its widget values and `session_state` are gone). stdio is a single session either way.
 - **Output capture** covers prose (`st.title`/`header`/`markdown`/`write`/`text`/…), status
   (`st.success`/`error`/`warning`/`info`/`toast`) and data (`st.metric` — with its delta's
-  good/bad colour — `code`, `json`, `dataframe`, `table`). Charts, images and media are not
-  captured.
+  good/bad colour — `code`, `json`, `dataframe`, `table`) and charts that carry their own data
+  (`st.line_chart`/`bar_chart`/`area_chart`/`scatter_chart`, `altair_chart`, `vega_lite_chart`)
+  as kind `chart`, with a one-line summary and the plotted records in `data` (up to 200 points).
+  Plotly, pyplot, maps, images and media are not captured.
 - **`--allow` and `--redact` filter *state*, not rendered output.** If the app itself renders a
   hidden value into an output (e.g. `st.write(st.session_state["secret"])`), that text is still
   returned. The guardrails govern state and widget access, not what the app chooses to display.

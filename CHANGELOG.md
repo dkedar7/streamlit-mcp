@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 (2026-11-13)
+
+- **New:** charts are read as outputs (#207). `st.line_chart`, `bar_chart`, `area_chart`,
+  `scatter_chart`, `altair_chart` and `vega_lite_chart` were dropped from every read surface, so
+  an agent driving a dashboard saw its metrics and tables but not its charts. Each is now an
+  output of kind `chart` with a one-line summary (`line chart: revenue, cost over Jan, Feb, Mar
+  (6 points)`) and a `data` field holding the plotted records, capped at 200 points. Native
+  charts' generated column names become `x`, `series` and `value`. Other outputs keep their
+  `{"kind", "text"}` shape. Plotly, pyplot, maps and images are still not captured.
+
 ## 0.13.0 (2026-11-12)
 
 - **New:** `config --client vscode` prints a `.vscode/mcp.json` block (#203). VS Code reads a

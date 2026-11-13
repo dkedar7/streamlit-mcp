@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import io
+import json
 import math
 import re
 import sys
@@ -92,6 +94,24 @@ OUTPUT_KINDS = (
 # what any single element contributes so one big output can't crowd out the rest of the app.
 MAX_OUTPUT_CHARS = 2000
 
+# A chart's records go into a structured `data` field rather than its text. A year of daily values
+# across a few series is thousands of points, so the field is capped like the text is, and the
+# text says how many points there are and how many are included.
+MAX_CHART_POINTS = 200
+
+# st.line_chart/bar_chart/area_chart/scatter_chart melt the app's DataFrame into long form under
+# these generated column names. They are renamed to what they mean, so a record reads
+# {"x": "Jan", "series": "revenue", "value": 10} rather than echoing Streamlit's internals.
+_CHART_COLUMNS = {
+    "index -- streamlit-generated": "x",
+    "color -- streamlit-generated": "series",
+    "value -- streamlit-generated": "value",
+}
+
+# The vega-lite mark a chart draws, named as a person would call the chart. st.scatter_chart draws
+# circles and altair's mark_point draws points; both are scatter plots.
+_CHART_MARKS = {"circle": "scatter", "point": "scatter"}
+
 # The two container nodes _walk yields before their children. They bracket the tree rather than
 # being content in it, so they never count as the last rendered element (see _exception).
 _ROOT_BLOCKS = ("sidebar", "main")
@@ -144,6 +164,8 @@ class WidgetSnapshot:
 class OutputSnapshot:
     kind: str
     text: str
+    # The records behind the output, for kinds whose text can only summarize them (a chart).
+    data: Optional[list] = None
 
 
 @dataclass
@@ -325,6 +347,11 @@ class AppTestRuntime:
                 text = self._output_text(kind, el)
                 if text is not None:
                     outputs.append(OutputSnapshot(kind=kind, text=text))
+            elif kind == "vega_lite_chart":
+                # Every Streamlit chart that carries its own data arrives as one vega-lite element:
+                # line/bar/area/scatter_chart, altair_chart and vega_lite_chart. For a dashboard
+                # the chart is the answer, and it was dropped from every surface (#207).
+                outputs.append(self._chart_output(el))
         # st.toast is the app's answer to an action ("Saved!") and renders in the event block,
         # outside the sidebar/main tree _walk covers — so it was dropped on every surface even
         # though AppTest exposes it (#170). It floats over the page rather than sitting at a
@@ -380,6 +407,84 @@ class AppTestRuntime:
             return cls._METRIC_VERDICTS.get(field.enum_type.values_by_number[proto.color].name)
         except Exception:
             return None
+
+    @classmethod
+    def _chart_output(cls, el) -> OutputSnapshot:
+        """A vega-lite chart as a one-line summary plus the records it plots.
+
+        AppTest has no accessor for charts, so the spec and the Arrow-encoded data are read off
+        the proto. A chart whose data can't be decoded is still reported, with no `data`, so its
+        presence is never silent."""
+        proto = getattr(el, "proto", None)
+        try:
+            spec = json.loads(proto.spec or "{}")
+        except Exception:
+            spec = {}
+        label = cls._chart_label(spec)
+        try:
+            records = cls._chart_records(proto)
+        except Exception:
+            return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
+        total = len(records)
+        text = f"{label}: {cls._chart_summary(records)}" if records else f"{label} (no data)"
+        if total > MAX_CHART_POINTS:
+            text += f" ({total} points; the first {MAX_CHART_POINTS} are in data)"
+        elif records:
+            text += f" ({total} point{'' if total == 1 else 's'})"
+        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=records[:MAX_CHART_POINTS])
+
+    @staticmethod
+    def _chart_records(proto) -> list:
+        """The chart's rows as JSON-safe records. Streamlit sends inline data either as the
+        chart's `data` or as named `datasets`; both are Arrow IPC streams."""
+        import pyarrow as pa
+
+        streams = [proto.data.data] if proto.data.data else []
+        streams += [ds.data.data for ds in proto.datasets]
+        records: list = []
+        for raw in streams:
+            frame = pa.ipc.open_stream(io.BytesIO(raw)).read_all().to_pandas()
+            frame = frame.rename(columns=_CHART_COLUMNS)
+            # to_json makes timestamps ISO strings and NaN null, as a JSON client needs them.
+            records += json.loads(frame.to_json(orient="records", date_format="iso"))
+        return records
+
+    @staticmethod
+    def _chart_label(spec: dict) -> str:
+        """'line chart', 'bar chart "Revenue"', … from the spec's mark and title. A native line
+        chart is a layer (the line plus hover points), so the first layer with a mark names it."""
+        mark = None
+        for node in (spec, *(spec.get("layer") or [])):
+            m = node.get("mark") if isinstance(node, dict) else None
+            m = m.get("type") if isinstance(m, dict) else m
+            if isinstance(m, str):
+                mark = m
+                break
+        label = f"{_CHART_MARKS.get(mark, mark)} chart" if mark else "chart"
+        title = spec.get("title")
+        title = title.get("text") if isinstance(title, dict) else title
+        if isinstance(title, list):
+            title = " ".join(str(t) for t in title)
+        return f"{label} {json.dumps(title)}" if title else label
+
+    @staticmethod
+    def _chart_summary(records: list) -> str:
+        """What the chart plots, in a few words: 'revenue, cost over Jan, Feb, Mar' for a native
+        chart (long form for several series, wide for one), else the columns it plots."""
+
+        def few(values: list) -> str:
+            seen = list(dict.fromkeys(str(v) for v in values))
+            head = ", ".join(seen[:6])
+            return head + (f", … ({len(seen)} in all)" if len(seen) > 6 else "")
+
+        columns = list(records[0])
+        if "x" not in columns:
+            return ", ".join(columns)
+        if "series" in columns and "value" in columns:
+            plotted = few([r.get("series") for r in records])
+        else:
+            plotted = ", ".join(c for c in columns if c != "x")
+        return f"{plotted} over {few([r.get('x') for r in records])}"
 
     @staticmethod
     def _truncate(text: str) -> str:

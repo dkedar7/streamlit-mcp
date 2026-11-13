@@ -108,7 +108,16 @@ def widgets_to_models(snapshot: RuntimeSnapshot) -> list[dict]:
 
 
 def outputs_to_list(snapshot: RuntimeSnapshot) -> list[dict]:
-    return [{"kind": o.kind, "text": o.text} for o in snapshot.outputs]
+    return [_output_to_dict(o) for o in snapshot.outputs]
+
+
+def _output_to_dict(o) -> dict:
+    # `data` appears only on outputs that carry records (a chart), so every other output keeps
+    # its {"kind", "text"} shape.
+    out = {"kind": o.kind, "text": o.text}
+    if o.data is not None:
+        out["data"] = o.data
+    return out
 
 
 # A slider/select_slider/date_input built with a tuple `value=` is a TWO-HANDLE RANGE widget whose
