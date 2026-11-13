@@ -38,6 +38,14 @@ transport for local clients.
 Widgets and outputs are returned in **document/render order** (the order the app renders them,
 recursing through the sidebar and columns), so the layout an agent reads back matches the app.
 
+A chart that carries its own data (`st.line_chart`, `bar_chart`, `area_chart`, `scatter_chart`,
+`altair_chart`, `vega_lite_chart`) is an output of kind `chart`. Its `text` is a one-line summary
+(`line chart: revenue, cost over Jan, Feb, Mar (6 points)`) and its `data` holds the plotted
+records, up to 200 of them. A native chart of several series reads
+`{"x": "Jan", "series": "revenue", "value": 10}`; a single series, or a chart given explicit
+columns, keeps the app's column names. `--read` prints the summary; `--json` and MCP include
+`data`. Plotly, pyplot, maps and images are not captured.
+
 Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
 `selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,
 `time_input`, `color_picker`, `pills`, `segmented_control`, `feedback`. Input widgets
