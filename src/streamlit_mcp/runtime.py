@@ -117,6 +117,11 @@ _CHART_MARKS = {"circle": "scatter", "point": "scatter"}
 _ROOT_BLOCKS = ("sidebar", "main")
 
 
+def _hashable(value: Any) -> Any:
+    """A chart record value as a set/dict key; JSON records hold only scalars, lists and dicts."""
+    return json.dumps(value, sort_keys=True) if isinstance(value, (list, dict)) else value
+
+
 def _display(value: Any) -> str:
     """A value as it should read in an error message an agent or human acts on: dates and times as
     the ISO strings they're set with, not ``datetime.date(2026, 1, 1)`` Python reprs."""
@@ -427,11 +432,33 @@ class AppTestRuntime:
             return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
         total = len(records)
         text = f"{label}: {cls._chart_summary(records)}" if records else f"{label} (no data)"
-        if total > MAX_CHART_POINTS:
-            text += f" ({total} points; the first {MAX_CHART_POINTS} are in data)"
+        data, note = cls._cap_chart(records)
+        if note:
+            text += f" ({total} points; {note})"
         elif records:
             text += f" ({total} point{'' if total == 1 else 's'})"
-        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=records[:MAX_CHART_POINTS])
+        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
+
+    @staticmethod
+    def _cap_chart(records: list) -> tuple[list, Optional[str]]:
+        """The records to return under MAX_CHART_POINTS, and how the cut was made (None if none).
+
+        A native chart of several series is melted series-major: every point of the first series,
+        then the second, and so on. A flat slice of that kept the leading series whole and cut the
+        last one short or dropped it, while the summary still listed it (#209). It is cut along the
+        x-axis instead, so what comes back is a smaller chart with every series present."""
+        if len(records) <= MAX_CHART_POINTS:
+            return records, None
+        if records and "x" in records[0] and "series" in records[0]:
+            xs = list(dict.fromkeys(_hashable(r.get("x")) for r in records))
+            n_series = len(dict.fromkeys(_hashable(r.get("series")) for r in records))
+            keep = max(1, MAX_CHART_POINTS // max(1, n_series))
+            if keep < len(xs):
+                kept = set(xs[:keep])
+                data = [r for r in records if _hashable(r.get("x")) in kept]
+                return data, (f"data has the first {keep} of {len(xs)} x-values, "
+                              f"for all {n_series} series")
+        return records[:MAX_CHART_POINTS], f"the first {MAX_CHART_POINTS} are in data"
 
     @staticmethod
     def _chart_records(proto) -> list:

@@ -143,3 +143,28 @@ def test_mcp_read_output_and_get_layout_carry_the_chart_data(tmp_path):
                 assert charts[0]["data"][0] == NATIVE
 
     asyncio.run(run())
+
+
+def test_a_multi_series_chart_is_capped_along_x_with_every_series_kept():
+    # 3 series x 80 x-values = 240 points, melted series-major; a flat slice dropped half of c (#209).
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "st.line_chart(pd.DataFrame({'a': range(80), 'b': range(80), 'c': range(80)}))\n"
+    )
+    from collections import Counter
+
+    from streamlit_mcp.runtime import MAX_CHART_POINTS
+    (chart,) = _charts(_engine(app))
+    keep = MAX_CHART_POINTS // 3
+    assert Counter(r["series"] for r in chart["data"]) == {"a": keep, "b": keep, "c": keep}
+    assert {r["x"] for r in chart["data"]} == set(range(keep))
+    assert f"(240 points; data has the first {keep} of 80 x-values, for all 3 series)" in chart["text"]
+
+
+def test_a_cap_that_would_drop_a_series_entirely_keeps_it():
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "st.bar_chart(pd.DataFrame({'a': range(100), 'b': range(100), 'c': range(100)}))\n"
+    )
+    (chart,) = _charts(_engine(app))
+    assert {r["series"] for r in chart["data"]} == {"a", "b", "c"}
