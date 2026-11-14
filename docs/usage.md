@@ -41,7 +41,8 @@ recursing through the sidebar and columns), so the layout an agent reads back ma
 A chart that carries its own data (`st.line_chart`, `bar_chart`, `area_chart`, `scatter_chart`,
 `altair_chart`, `vega_lite_chart`) is an output of kind `chart`. Its `text` is a one-line summary
 (`line chart: revenue, cost over Jan, Feb, Mar (6 points)`) and its `data` holds the plotted
-records, up to 200 of them. A native chart of several series reads
+records, up to 200 of them (a chart of several series is cut along the x-axis, so every
+series stays in `data`). A native chart of several series reads
 `{"x": "Jan", "series": "revenue", "value": 10}`; a single series, or a chart given explicit
 columns, keeps the app's column names. `--read` prints the summary; `--json` and MCP include
 `data`. Plotly, pyplot, maps and images are not captured.

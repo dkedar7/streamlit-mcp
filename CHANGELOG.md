@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.1 (2026-11-14)
+
+- **Fix:** a capped multi-series chart returned an incoherent subset (#209). Native charts send
+  their points series by series, so cutting the first 200 kept the leading series whole and cut
+  the last one short or dropped it, while the summary still listed it. A chart of several series
+  is now cut along the x-axis: `data` holds the first x-values for every series, and the summary
+  says so (`data has the first 66 of 80 x-values, for all 3 series`).
+
 ## 0.14.0 (2026-11-13)
 
 - **New:** charts are read as outputs (#207). `st.line_chart`, `bar_chart`, `area_chart`,
