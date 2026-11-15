@@ -69,9 +69,9 @@ def test_explicit_columns_altair_and_vega_lite_keep_their_own_field_names():
     )
     charts = _charts(_engine(app))
     assert [(c["text"], c["data"]) for c in charts] == [
-        ("scatter chart: a, b (2 points)", [{"a": 1, "b": 3}, {"a": 2, "b": 4}]),
-        ('bar chart "Size": h, w (1 point)', [{"h": 1, "w": 2}]),
-        ("line chart: t, v (1 point)", [{"t": 1, "v": 9}]),
+        ("scatter chart: b over 1, 2 (2 points)", [{"a": 1, "b": 3}, {"a": 2, "b": 4}]),
+        ('bar chart "Size": w over 1 (1 point)', [{"h": 1, "w": 2}]),
+        ("line chart: v over 1 (1 point)", [{"t": 1, "v": 9}]),
     ]
 
 
@@ -168,3 +168,48 @@ def test_a_cap_that_would_drop_a_series_entirely_keeps_it():
     )
     (chart,) = _charts(_engine(app))
     assert {r["series"] for r in chart["data"]} == {"a", "b", "c"}
+
+
+def _chart_texts(app):
+    return [c["text"] for c in _charts(_engine(app))]
+
+
+def test_a_named_index_summarizes_like_its_unnamed_twin():
+    # A named index keeps its name in the records, so the summary can't assume "x" (#211).
+    frame = "pd.DataFrame({'revenue': [100, 150, 120], 'cost': [60, 70, 65]}, index=%s)"
+    months = "['2026-01', '2026-02', '2026-03']"
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        f"st.line_chart({frame % months})\n"
+        f"st.line_chart({frame % ('pd.Index(' + months + ', name=' + repr('month') + ')')})\n"
+    )
+    charts = _charts(_engine(app))
+    expected = "line chart: revenue, cost over 2026-01, 2026-02, 2026-03 (6 points)"
+    assert [c["text"] for c in charts] == [expected, expected]
+    assert charts[1]["data"][0] == {"month": "2026-01", "series": "revenue", "value": 100}
+
+
+def test_explicit_x_with_several_y_and_an_explicit_color():
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "st.line_chart(pd.DataFrame({'t': [1, 2, 3], 'a': [4, 5, 6], 'b': [7, 8, 9]}),\n"
+        "              x='t', y=['a', 'b'])\n"
+        "st.bar_chart(pd.DataFrame({'day': ['Mon', 'Mon', 'Tue', 'Tue'], 'sales': [10, 20, 15, 25],\n"
+        "                           'region': ['east', 'west', 'east', 'west']}),\n"
+        "             x='day', y='sales', color='region')\n"
+    )
+    assert _chart_texts(app) == [
+        "line chart: a, b over 1, 2, 3 (6 points)",
+        "bar chart: sales by region (east, west) over Mon, Tue (4 points)",
+    ]
+
+
+def test_a_named_index_multi_series_chart_is_still_capped_along_x():
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "st.line_chart(pd.DataFrame({'a': range(80), 'b': range(80), 'c': range(80)},\n"
+        "                           index=pd.Index(range(80), name='day')))\n"
+    )
+    (chart,) = _charts(_engine(app))
+    assert {r["series"] for r in chart["data"]} == {"a", "b", "c"}
+    assert "data has the first 66 of 80 x-values, for all 3 series" in chart["text"]
