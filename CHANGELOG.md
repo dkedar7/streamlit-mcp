@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.2 (2026-11-15)
+
+- **Fix:** a chart's summary assumed its x-axis column was named `x` (#211). A native chart of a
+  DataFrame with a named index (`month`), or one built with an explicit `x=`, keeps that name,
+  so the summary listed raw columns (`month, series, value`) and the 0.14.1 x-axis cap fell back
+  to a flat cut. The x-axis and colour fields are now read from the chart's own encoding:
+  `revenue, cost over 2026-01, 2026-02, 2026-03` either way, `a, b over 1, 2, 3` for
+  `x="t", y=["a", "b"]`, and `sales by region (east, west) over Mon, Tue` for an explicit
+  `color=`. Charts built with explicit columns (altair, `vega_lite_chart`) now read `y over x`
+  too, instead of listing their columns.
+
 ## 0.14.1 (2026-11-14)
 
 - **Fix:** a capped multi-series chart returned an incoherent subset (#209). Native charts send

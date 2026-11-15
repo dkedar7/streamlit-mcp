@@ -431,8 +431,9 @@ class AppTestRuntime:
         except Exception:
             return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
         total = len(records)
-        text = f"{label}: {cls._chart_summary(records)}" if records else f"{label} (no data)"
-        data, note = cls._cap_chart(records)
+        x, color = cls._chart_axes(spec)
+        text = f"{label}: {cls._chart_summary(records, x, color)}" if records else f"{label} (no data)"
+        data, note = cls._cap_chart(records, x, color)
         if note:
             text += f" ({total} points; {note})"
         elif records:
@@ -440,7 +441,27 @@ class AppTestRuntime:
         return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
 
     @staticmethod
-    def _cap_chart(records: list) -> tuple[list, Optional[str]]:
+    def _chart_axes(spec: dict) -> tuple[Optional[str], Optional[str]]:
+        """The record fields on the chart's x-axis and colour channel, from the spec's encoding.
+
+        The x column is named by the app, not by us: an unnamed index becomes `x`, but a named
+        index (`month`) or an explicit `x="t"` keeps its own name. Assuming `x` misread both (#211).
+        A native line chart is a layer, so the first node with an encoding is used."""
+        for node in (spec, *(spec.get("layer") or [])):
+            encoding = node.get("encoding") if isinstance(node, dict) else None
+            if not isinstance(encoding, dict):
+                continue
+
+            def field(channel: str) -> Optional[str]:
+                f = encoding.get(channel)
+                f = f.get("field") if isinstance(f, dict) else None
+                return _CHART_COLUMNS.get(f, f) if isinstance(f, str) else None
+
+            return field("x"), field("color")
+        return None, None
+
+    @staticmethod
+    def _cap_chart(records: list, x: Optional[str], color: Optional[str]) -> tuple[list, Optional[str]]:
         """The records to return under MAX_CHART_POINTS, and how the cut was made (None if none).
 
         A native chart of several series is melted series-major: every point of the first series,
@@ -449,13 +470,13 @@ class AppTestRuntime:
         x-axis instead, so what comes back is a smaller chart with every series present."""
         if len(records) <= MAX_CHART_POINTS:
             return records, None
-        if records and "x" in records[0] and "series" in records[0]:
-            xs = list(dict.fromkeys(_hashable(r.get("x")) for r in records))
-            n_series = len(dict.fromkeys(_hashable(r.get("series")) for r in records))
+        if records and x in records[0] and color in records[0]:
+            xs = list(dict.fromkeys(_hashable(r.get(x)) for r in records))
+            n_series = len(dict.fromkeys(_hashable(r.get(color)) for r in records))
             keep = max(1, MAX_CHART_POINTS // max(1, n_series))
             if keep < len(xs):
                 kept = set(xs[:keep])
-                data = [r for r in records if _hashable(r.get("x")) in kept]
+                data = [r for r in records if _hashable(r.get(x)) in kept]
                 return data, (f"data has the first {keep} of {len(xs)} x-values, "
                               f"for all {n_series} series")
         return records[:MAX_CHART_POINTS], f"the first {MAX_CHART_POINTS} are in data"
@@ -495,9 +516,10 @@ class AppTestRuntime:
         return f"{label} {json.dumps(title)}" if title else label
 
     @staticmethod
-    def _chart_summary(records: list) -> str:
+    def _chart_summary(records: list, x: Optional[str], color: Optional[str]) -> str:
         """What the chart plots, in a few words: 'revenue, cost over Jan, Feb, Mar' for a native
-        chart (long form for several series, wide for one), else the columns it plots."""
+        chart of several series, 'sales by region (east, west) over Mon, Tue' for an explicit
+        colour, 'temp over …' for one series. Without a known x-axis, the columns it plots."""
 
         def few(values: list) -> str:
             seen = list(dict.fromkeys(str(v) for v in values))
@@ -505,13 +527,16 @@ class AppTestRuntime:
             return head + (f", … ({len(seen)} in all)" if len(seen) > 6 else "")
 
         columns = list(records[0])
-        if "x" not in columns:
+        if x not in columns:
             return ", ".join(columns)
-        if "series" in columns and "value" in columns:
-            plotted = few([r.get("series") for r in records])
-        else:
-            plotted = ", ".join(c for c in columns if c != "x")
-        return f"{plotted} over {few([r.get('x') for r in records])}"
+        xs = few([r.get(x) for r in records])
+        plotted = ", ".join(c for c in columns if c not in (x, color))
+        if color in columns:
+            groups = few([r.get(color) for r in records])
+            if color == "series":  # Streamlit melted the app's columns: each one is a series
+                return f"{groups} over {xs}"
+            return f"{plotted} by {color} ({groups}) over {xs}"
+        return f"{plotted} over {xs}" if plotted else xs
 
     @staticmethod
     def _truncate(text: str) -> str:
