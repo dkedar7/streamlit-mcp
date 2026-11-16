@@ -102,11 +102,27 @@ MAX_CHART_POINTS = 200
 # st.line_chart/bar_chart/area_chart/scatter_chart melt the app's DataFrame into long form under
 # these generated column names. They are renamed to what they mean, so a record reads
 # {"x": "Jan", "series": "revenue", "value": 10} rather than echoing Streamlit's internals.
+# Each generated name has fallbacks: the app's own columns keep their names, so a one-column
+# chart of a column called "x" puts its index under "index" rather than a second "x" (#213).
 _CHART_COLUMNS = {
-    "index -- streamlit-generated": "x",
-    "color -- streamlit-generated": "series",
-    "value -- streamlit-generated": "value",
+    "index -- streamlit-generated": ("x", "index"),
+    "color -- streamlit-generated": ("series",),
+    "value -- streamlit-generated": ("value",),
 }
+
+
+def _chart_renames(columns: list) -> dict:
+    """How to rename one chart frame's generated columns without colliding with its others.
+    A generated column whose names are all taken keeps its generated name."""
+    taken = {c for c in columns if c not in _CHART_COLUMNS}
+    renames = {}
+    for generated, names in _CHART_COLUMNS.items():
+        if generated in columns:
+            name = next((n for n in names if n not in taken), None)
+            if name:
+                renames[generated] = name
+                taken.add(name)
+    return renames
 
 # The vega-lite mark a chart draws, named as a person would call the chart. st.scatter_chart draws
 # circles and altair's mark_point draws points; both are scatter plots.
@@ -427,11 +443,11 @@ class AppTestRuntime:
             spec = {}
         label = cls._chart_label(spec)
         try:
-            records = cls._chart_records(proto)
+            records, renames = cls._chart_records(proto)
         except Exception:
             return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
         total = len(records)
-        x, color = cls._chart_axes(spec)
+        x, color = cls._chart_axes(spec, renames)
         text = f"{label}: {cls._chart_summary(records, x, color)}" if records else f"{label} (no data)"
         data, note = cls._cap_chart(records, x, color)
         if note:
@@ -441,7 +457,7 @@ class AppTestRuntime:
         return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
 
     @staticmethod
-    def _chart_axes(spec: dict) -> tuple[Optional[str], Optional[str]]:
+    def _chart_axes(spec: dict, renames: dict) -> tuple[Optional[str], Optional[str]]:
         """The record fields on the chart's x-axis and colour channel, from the spec's encoding.
 
         The x column is named by the app, not by us: an unnamed index becomes `x`, but a named
@@ -455,7 +471,7 @@ class AppTestRuntime:
             def field(channel: str) -> Optional[str]:
                 f = encoding.get(channel)
                 f = f.get("field") if isinstance(f, dict) else None
-                return _CHART_COLUMNS.get(f, f) if isinstance(f, str) else None
+                return renames.get(f, f) if isinstance(f, str) else None
 
             return field("x"), field("color")
         return None, None
@@ -482,20 +498,24 @@ class AppTestRuntime:
         return records[:MAX_CHART_POINTS], f"the first {MAX_CHART_POINTS} are in data"
 
     @staticmethod
-    def _chart_records(proto) -> list:
-        """The chart's rows as JSON-safe records. Streamlit sends inline data either as the
-        chart's `data` or as named `datasets`; both are Arrow IPC streams."""
+    def _chart_records(proto) -> tuple[list, dict]:
+        """The chart's rows as JSON-safe records, and the renames applied to its generated
+        columns. Streamlit sends inline data either as the chart's `data` or as named `datasets`;
+        both are Arrow IPC streams."""
         import pyarrow as pa
 
         streams = [proto.data.data] if proto.data.data else []
         streams += [ds.data.data for ds in proto.datasets]
         records: list = []
+        renames: dict = {}
         for raw in streams:
             frame = pa.ipc.open_stream(io.BytesIO(raw)).read_all().to_pandas()
-            frame = frame.rename(columns=_CHART_COLUMNS)
+            frame_renames = _chart_renames(list(frame.columns))
+            renames.update(frame_renames)
+            frame = frame.rename(columns=frame_renames)
             # to_json makes timestamps ISO strings and NaN null, as a JSON client needs them.
             records += json.loads(frame.to_json(orient="records", date_format="iso"))
-        return records
+        return records, renames
 
     @staticmethod
     def _chart_label(spec: dict) -> str:

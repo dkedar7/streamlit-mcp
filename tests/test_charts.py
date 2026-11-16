@@ -213,3 +213,21 @@ def test_a_named_index_multi_series_chart_is_still_capped_along_x():
     (chart,) = _charts(_engine(app))
     assert {r["series"] for r in chart["data"]} == {"a", "b", "c"}
     assert "data has the first 66 of 80 x-values, for all 3 series" in chart["text"]
+
+
+def test_a_single_column_named_x_keeps_its_records():
+    # The generated index used to be renamed onto the app's own "x" column, two columns named
+    # "x", and the whole chart came back "data not readable" (#213).
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "for chart in (st.line_chart, st.bar_chart, st.area_chart, st.scatter_chart):\n"
+        "    chart(pd.DataFrame({'x': [10, 20, 30]}))\n"
+        "st.line_chart(pd.DataFrame({'x': [1], 'index': [2]}))\n"
+    )
+    charts = _charts(_engine(app))
+    for c in charts[:4]:
+        assert c["text"].endswith(": x over 0, 1, 2 (3 points)"), c["text"]
+        assert c["data"] == [{"index": 0, "x": 10}, {"index": 1, "x": 20}, {"index": 2, "x": 30}]
+    # Both short names taken: the index keeps Streamlit's name rather than colliding.
+    assert "not readable" not in charts[4]["text"]
+    assert len(charts[4]["data"]) == 2

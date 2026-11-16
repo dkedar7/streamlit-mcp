@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.3 (2026-11-16)
+
+- **Fix:** a one-column native chart whose column is named `x` came back as
+  `chart (data not readable)` with no data (#213). Its generated index was renamed to `x` too,
+  and two columns with one name can't be serialized. Generated columns now take a name only if
+  the chart's own columns don't use it: here the index becomes `index`, and the chart reads
+  `line chart: x over 0, 1, 2 (3 points)`.
+
 ## 0.14.2 (2026-11-15)
 
 - **Fix:** a chart's summary assumed its x-axis column was named `x` (#211). A native chart of a
