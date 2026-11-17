@@ -231,3 +231,27 @@ def test_a_single_column_named_x_keeps_its_records():
     # Both short names taken: the index keeps Streamlit's name rather than colliding.
     assert "not readable" not in charts[4]["text"]
     assert len(charts[4]["data"]) == 2
+
+
+def test_a_horizontal_chart_summarizes_like_its_vertical_twin():
+    # horizontal=True swaps the x/y channels; the summary read the values as the axis (#215).
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "df = pd.DataFrame({'region': ['east', 'west', 'north'], 'sales': [10, 20, 30]})\n"
+        "st.bar_chart(df, x='region', y='sales')\n"
+        "st.bar_chart(df, x='region', y='sales', horizontal=True)\n"
+        "wide = pd.DataFrame({'a': [1, 2], 'b': [3, 4]}, index=['p', 'q'])\n"
+        "st.bar_chart(wide)\n"
+        "st.bar_chart(wide, horizontal=True)\n"
+    )
+    texts = _chart_texts(app)
+    assert texts[0] == texts[1] == "bar chart: sales over east, west, north (3 points)"
+    assert texts[2] == texts[3] == "bar chart: a, b over p, q (4 points)"
+
+
+def test_a_quantitative_x_scatter_keeps_x_as_its_axis():
+    app = (
+        "import streamlit as st, pandas as pd\n"
+        "st.scatter_chart(pd.DataFrame({'a': [1, 2], 'b': [3, 4]}), x='a', y='b')\n"
+    )
+    assert _chart_texts(app) == ["scatter chart: b over 1, 2 (2 points)"]

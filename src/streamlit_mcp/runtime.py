@@ -462,7 +462,11 @@ class AppTestRuntime:
 
         The x column is named by the app, not by us: an unnamed index becomes `x`, but a named
         index (`month`) or an explicit `x="t"` keeps its own name. Assuming `x` misread both (#211).
-        A native line chart is a layer, so the first node with an encoding is used."""
+        A native line chart is a layer, so the first node with an encoding is used.
+
+        `horizontal=True` draws the same chart sideways by swapping the x and y channels, so the
+        app's x column sits on `y` and the measured values on `x`. Taking `x` as-is read the
+        values as the axis (#215). When `x` is quantitative and `y` isn't, `y` is the axis."""
         for node in (spec, *(spec.get("layer") or [])):
             encoding = node.get("encoding") if isinstance(node, dict) else None
             if not isinstance(encoding, dict):
@@ -473,7 +477,14 @@ class AppTestRuntime:
                 f = f.get("field") if isinstance(f, dict) else None
                 return renames.get(f, f) if isinstance(f, str) else None
 
-            return field("x"), field("color")
+            def kind(channel: str) -> Optional[str]:
+                f = encoding.get(channel)
+                return f.get("type") if isinstance(f, dict) else None
+
+            axis = "x"
+            if kind("x") == "quantitative" and kind("y") not in (None, "quantitative"):
+                axis = "y"
+            return field(axis), field("color")
         return None, None
 
     @staticmethod
