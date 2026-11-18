@@ -447,8 +447,8 @@ class AppTestRuntime:
         except Exception:
             return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
         total = len(records)
-        x, color = cls._chart_axes(spec, renames)
-        text = f"{label}: {cls._chart_summary(records, x, color)}" if records else f"{label} (no data)"
+        x, y, color = cls._chart_axes(spec, renames)
+        text = f"{label}: {cls._chart_summary(records, x, y, color)}" if records else f"{label} (no data)"
         data, note = cls._cap_chart(records, x, color)
         if note:
             text += f" ({total} points; {note})"
@@ -457,8 +457,10 @@ class AppTestRuntime:
         return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
 
     @staticmethod
-    def _chart_axes(spec: dict, renames: dict) -> tuple[Optional[str], Optional[str]]:
-        """The record fields on the chart's x-axis and colour channel, from the spec's encoding.
+    def _chart_axes(spec: dict, renames: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """The record fields on the chart's x-axis, its measured axis and its colour channel, from
+        the spec's encoding. The measured field is what the chart plots: a frame can carry columns
+        the chart never draws, so subtracting x and colour from its columns over-reported (#216).
 
         The x column is named by the app, not by us: an unnamed index becomes `x`, but a named
         index (`month`) or an explicit `x="t"` keeps its own name. Assuming `x` misread both (#211).
@@ -481,11 +483,11 @@ class AppTestRuntime:
                 f = encoding.get(channel)
                 return f.get("type") if isinstance(f, dict) else None
 
-            axis = "x"
+            axis, measure = "x", "y"
             if kind("x") == "quantitative" and kind("y") not in (None, "quantitative"):
-                axis = "y"
-            return field(axis), field("color")
-        return None, None
+                axis, measure = "y", "x"
+            return field(axis), field(measure), field("color")
+        return None, None, None
 
     @staticmethod
     def _cap_chart(records: list, x: Optional[str], color: Optional[str]) -> tuple[list, Optional[str]]:
@@ -547,7 +549,7 @@ class AppTestRuntime:
         return f"{label} {json.dumps(title)}" if title else label
 
     @staticmethod
-    def _chart_summary(records: list, x: Optional[str], color: Optional[str]) -> str:
+    def _chart_summary(records: list, x: Optional[str], y: Optional[str], color: Optional[str]) -> str:
         """What the chart plots, in a few words: 'revenue, cost over Jan, Feb, Mar' for a native
         chart of several series, 'sales by region (east, west) over Mon, Tue' for an explicit
         colour, 'temp over …' for one series. Without a known x-axis, the columns it plots."""
@@ -561,7 +563,12 @@ class AppTestRuntime:
         if x not in columns:
             return ", ".join(columns)
         xs = few([r.get(x) for r in records])
-        plotted = ", ".join(c for c in columns if c not in (x, color))
+        # The encoded measure when the chart names one; otherwise (a y with no field, such as an
+        # aggregate count) every column that isn't the axis or the colour.
+        if y in columns and y not in (x, color):
+            plotted = y
+        else:
+            plotted = ", ".join(c for c in columns if c not in (x, color))
         if color in columns:
             groups = few([r.get(color) for r in records])
             if color == "series":  # Streamlit melted the app's columns: each one is a series

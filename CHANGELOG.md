@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.4 (2026-11-18)
+
+- **Fix:** an altair or `vega_lite_chart` chart's summary listed columns the chart doesn't draw
+  (#216). What a chart plots was taken as every column but the x-axis and colour, so a frame
+  carrying an extra `notes` column read `revenue, notes over Jan, Feb, Mar`. The plotted field
+  now comes from the chart's own `y` encoding (`x` for a horizontal chart): `revenue over Jan,
+  Feb, Mar`. Fields used only for tooltips or detail aren't counted as plotted. `data` still
+  returns every column, unchanged.
+
 ## 0.14.3 (2026-11-17)
 
 - **Fix:** a one-column native chart whose column is named `x` came back as
