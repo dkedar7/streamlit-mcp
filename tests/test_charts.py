@@ -255,3 +255,21 @@ def test_a_quantitative_x_scatter_keeps_x_as_its_axis():
         "st.scatter_chart(pd.DataFrame({'a': [1, 2], 'b': [3, 4]}), x='a', y='b')\n"
     )
     assert _chart_texts(app) == ["scatter chart: b over 1, 2 (2 points)"]
+
+
+def test_columns_the_chart_does_not_encode_are_not_reported_as_plotted():
+    # A frame can carry columns the chart never draws; the summary listed them (#216).
+    app = (
+        "import streamlit as st, pandas as pd, altair as alt\n"
+        "df = pd.DataFrame({'month': ['Jan', 'Feb', 'Mar'], 'revenue': [10, 20, 30],\n"
+        "                   'notes': ['ok', 'ok', 'ok']})\n"
+        "st.altair_chart(alt.Chart(df).mark_line().encode(x='month', y='revenue'))\n"
+        "st.vega_lite_chart(df, {'mark': 'line', 'encoding': {\n"
+        "    'x': {'field': 'month', 'type': 'ordinal'},\n"
+        "    'y': {'field': 'revenue', 'type': 'quantitative'}}})\n"
+        "st.altair_chart(alt.Chart(df).mark_bar().encode(y='month', x='revenue'))\n"
+    )
+    charts = _charts(_engine(app))
+    assert [c["text"] for c in charts] == ["line chart: revenue over Jan, Feb, Mar (3 points)"] * 2 + [
+        "bar chart: revenue over Jan, Feb, Mar (3 points)"]
+    assert charts[0]["data"][0] == {"month": "Jan", "revenue": 10, "notes": "ok"}  # data untouched
