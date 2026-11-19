@@ -50,7 +50,8 @@ def test_the_editor_is_a_widget_and_a_plain_dataframe_stays_an_output():
     assert w["identifier"] == "cart"
     assert w["value"] == {"rows": [{"qty": 1, "price": 10}, {"qty": 2, "price": 20}],
                           "edits": {"edited_rows": {}, "added_rows": [], "deleted_rows": []}}
-    assert w["constraints"] == {"columns": ["qty", "price"], "dynamic": True}
+    assert w["constraints"] == {"columns": ["qty", "price"], "dynamic": True,
+                                "column_types": {"qty": "integer", "price": "integer"}}
     assert set(w["schema"]["properties"]["value"]["properties"]) == {"edit", "add", "delete"}
     outputs = eng.read_output()["outputs"]
     assert [o["kind"] for o in outputs].count("dataframe") == 1  # only the read-only one (#128)
@@ -179,3 +180,63 @@ def test_mcp_set_widget_drives_the_editor(tmp_path):
     out = asyncio.run(go())
     assert {"kind": "metric", "text": "Total: 90"} in out["outputs"]
     assert out["session_state"]["cart"]["edited_rows"] == {"0": {"qty": 5}}
+
+
+TYPED_APP = (
+    "import streamlit as st, pandas as pd\n"
+    "df = pd.DataFrame({'item': ['apple', 'pear'], 'qty': [1, 2], 'price': [1.5, 2.0],\n"
+    "                   'ok': [True, False], 'when': pd.to_datetime(['2026-01-01', '2026-01-02'])})\n"
+    "e = st.data_editor(df, key='grid', num_rows='dynamic')\n"
+    "st.metric('Qty', int(e['qty'].sum()))\n"
+)
+
+
+def test_column_types_are_advertised_in_constraints_and_schema():
+    """An agent learns each column's cell type up front, from one source (#218)."""
+    w = _editor(_engine(TYPED_APP))
+    types = {"item": "string", "qty": "integer", "price": "number", "ok": "boolean"}
+    assert w["constraints"]["column_types"] == types  # the datetime column isn't checked
+    cell = w["schema"]["properties"]["value"]["properties"]["edit"]["additionalProperties"]
+    assert cell["properties"] == {k: {"type": [t, "null"]} for k, t in types.items()}
+
+
+@pytest.mark.parametrize("bad, msg", [
+    ({"edit": {"0": {"qty": "not_a_number"}}}, "qty in edit of row 0 must be an integer"),
+    ({"edit": {"0": {"qty": 2.7}}}, "must be an integer"),
+    ({"edit": {"0": {"qty": True}}}, "must be an integer"),
+    ({"edit": {"1": {"price": "cheap"}}}, "price in edit of row 1 must be a number"),
+    ({"edit": {"0": {"ok": 1}}}, "ok in edit of row 0 must be true or false"),
+    ({"edit": {"0": {"item": 5}}}, "item in edit of row 0 must be a string"),
+    ({"add": [{"qty": "x"}]}, "qty in added row 0 must be an integer"),
+])
+def test_a_cell_that_misfits_its_column_is_rejected_atomically(bad, msg):
+    """Streamlit coerces a misfit cell to NaN and reports success; a browser user can't type it.
+    The edit is rejected with the edits so far untouched (#218)."""
+    from streamlit_mcp.runtime import RuntimeError_
+    eng = _engine(TYPED_APP)
+    eng.set_widget("grid", {"edit": {"1": {"qty": 5}}})
+    before = _editor(eng)["value"]["edits"]
+    with pytest.raises(RuntimeError_, match=msg):
+        eng.set_widget("grid", bad)
+    assert _editor(eng)["value"]["edits"] == before
+    assert _metric(eng) == ["Qty: 6"]
+
+
+def test_cells_that_fit_their_column_are_accepted():
+    eng = _engine(TYPED_APP)
+    eng.set_widget("grid", {"edit": {"0": {"qty": 4.0, "price": 3, "ok": False, "item": "fig"}},
+                            "add": [{"qty": 10, "when": "2026-02-01"}]})
+    edits = _editor(eng)["value"]["edits"]
+    assert edits["edited_rows"]["0"] == {"qty": 4, "price": 3, "ok": False, "item": "fig"}
+    assert _metric(eng) == ["Qty: 16"]
+    eng.set_widget("grid", {"edit": {"1": {"qty": None}}})  # null clears a cell, as in a browser
+    assert _metric(eng) == ["Qty: 14"]
+
+
+def test_cli_strict_rejects_a_misfit_cell(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "grid.py"
+    app.write_text(TYPED_APP)
+    assert main(["call", str(app), "--set", 'grid={"edit": {"0": {"qty": "nope"}}}',
+                 "--strict"]) == 1
+    assert "must be an integer" in capsys.readouterr().err

@@ -63,7 +63,10 @@ streamlit-mcp call app.py --set 'cart={"edit": {"0": {"qty": 5}}, "add": [{"qty"
 Row numbers are positions in the app's original data, and row `n + i` is the i-th added row.
 Edits accumulate, and `null` resets the table. Adding or deleting rows needs
 `num_rows="dynamic"` (advertised as `constraints.dynamic`), and an unknown column or row is
-rejected without changing anything. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
+rejected without changing anything. So is a cell value that doesn't fit its column, as in a
+browser's cell editor: integer, number, boolean and all-string columns are listed in
+`constraints.column_types` (and in the schema), and `null` clears a cell. Other columns, such as
+dates, are passed through unchecked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
 AppTest never holds the edited table, so read the result from what the app renders. Inside an
 `st.form`, edits are held until the submit, like any other field.
 

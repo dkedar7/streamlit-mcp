@@ -83,6 +83,8 @@ def _constraints(w: WidgetSnapshot) -> dict:
     if w.kind == "data_editor":
         c["columns"] = list(w.columns or [])
         c["dynamic"] = bool(w.dynamic)  # whether rows can be added/deleted
+        if w.column_types:  # what each type-checked column's cells take (#218)
+            c["column_types"] = dict(w.column_types)
     return c
 
 
@@ -262,7 +264,9 @@ def tool_schema_for(model: dict) -> dict:
     elif kind == "data_editor":
         # Edits in Streamlit's own protocol; row numbers are positions in the app's original data.
         cols = list(c.get("columns", []))
-        cell = {"type": "object", "propertyNames": {"enum": cols}}
+        types = c.get("column_types") or {}
+        cell = {"type": "object", "propertyNames": {"enum": cols},
+                "properties": {k: {"type": [t, "null"]} for k, t in types.items()}}
         ops: dict = {"edit": {"type": "object", "additionalProperties": cell,
                               "description": "row number -> {column: new value}"}}
         if c.get("dynamic"):
