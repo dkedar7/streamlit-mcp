@@ -99,7 +99,7 @@ transport for local clients.
 
 Supported widgets: text_input, number_input, text_area, slider, select_slider, selectbox,
 multiselect, checkbox, toggle, radio, button, date_input, time_input, color_picker, pills,
-segmented_control, feedback — including
+segmented_control, feedback, data_editor — including
 their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
 `st.date_input("Dates", (start, end))`), which advertise a 2-element array schema and take
 `[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
@@ -107,8 +107,13 @@ form's submit button. As in a browser, the fields are held until Submit sends th
 Each field and submit button reports the `form` it belongs to, so in an app with several forms
 an agent clicks the submit whose `form` matches the fields it set.
 
+An `st.data_editor` reports the app's original `rows` and the `edits` applied so far, and takes
+`{"edit": {"0": {"qty": 5}}, "add": [{"qty": 1}], "delete": [1]}` (row numbers are positions in the
+app's data; edits accumulate; `null` resets it). The edited table itself is what the app computes
+from those edits, so read it from what the app renders.
+
 Input widgets streamlit-mcp can't drive (file_uploader, camera_input, audio_input, chat_input,
-data_editor, …) are reported explicitly on every surface (text `--layout`,
+…) are reported explicitly on every surface (text `--layout`,
 `--json`, MCP `get_layout`), never silently dropped — wherever they're placed, including
 `st.sidebar.file_uploader(...)` and inside columns, tabs and containers.
 

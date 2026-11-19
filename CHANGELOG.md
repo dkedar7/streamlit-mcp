@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.0 (2026-11-19)
+
+- **Feature:** `st.data_editor` is now a drivable widget instead of an unsupported element (#204).
+  `set_widget` (and `call --set`) takes Streamlit's own edit protocol:
+  `{"edit": {"0": {"qty": 5}}, "add": [{"qty": 1}], "delete": [1]}`. Row numbers are positions
+  in the app's original data, edits accumulate, and `null` resets the table. Adding or deleting
+  rows needs `num_rows="dynamic"` (advertised as `constraints.dynamic`); an unknown row or column
+  is rejected without changing anything. Inside an `st.form`, edits are held until submit.
+  Its value is `{"rows": <the app's original data>, "edits": ...}`: AppTest never holds the
+  edited table, so read the result from what the app renders.
+
 ## 0.14.4 (2026-11-18)
 
 - **Fix:** an altair or `vega_lite_chart` chart's summary listed columns the chart doesn't draw
