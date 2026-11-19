@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.1 (2026-11-19)
+
+- **Fix:** a `data_editor` cell value wasn't checked against its column's type (#218). A string
+  sent into an integer column was accepted, then Streamlit coerced it to `NaN` with only a stderr
+  traceback, and the call reported success (even with `--strict`). The bad edit also stayed in
+  place for later calls. Integer, number, boolean and all-string columns are now type-checked
+  the way a browser's cell editor is: a value that doesn't fit is rejected and the table is left
+  as it was (`qty in edit of row 0 must be an integer; got 'not_a_number'`). An integral number
+  such as `4.0` is accepted in an integer column as `4`, and `null` still clears a cell.
+  The column types are advertised in `constraints.column_types` and the widget schema, so an
+  agent can see them before writing. Other columns, such as dates, aren't checked.
+
 ## 0.15.0 (2026-11-19)
 
 - **Feature:** `st.data_editor` is now a drivable widget instead of an unsupported element (#204).

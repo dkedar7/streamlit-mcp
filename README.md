@@ -109,7 +109,8 @@ an agent clicks the submit whose `form` matches the fields it set.
 
 An `st.data_editor` reports the app's original `rows` and the `edits` applied so far, and takes
 `{"edit": {"0": {"qty": 5}}, "add": [{"qty": 1}], "delete": [1]}` (row numbers are positions in the
-app's data; edits accumulate; `null` resets it). The edited table itself is what the app computes
+app's data; edits accumulate; `null` resets it). A cell value that doesn't fit its column's type
+is rejected, as in a browser. The edited table itself is what the app computes
 from those edits, so read it from what the app renders.
 
 Input widgets streamlit-mcp can't drive (file_uploader, camera_input, audio_input, chat_input,

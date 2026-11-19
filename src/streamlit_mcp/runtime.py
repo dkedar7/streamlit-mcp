@@ -189,6 +189,8 @@ class WidgetSnapshot:
     # data_editor only: its column names, and whether rows can be added/deleted (num_rows="dynamic").
     columns: Optional[list] = None
     dynamic: Optional[bool] = None
+    # data_editor only: {column: JSON type} for the columns whose cells are type-checked (#218).
+    column_types: Optional[dict] = None
 
 
 @dataclass
@@ -314,6 +316,55 @@ class AppTestRuntime:
         except Exception:
             return []
 
+    @staticmethod
+    def _column_types(el) -> dict:
+        """{column: JSON type} for an editor's columns whose cells a browser user can only fill
+        with one type: integer, number, boolean, or string (an object column holding only
+        strings). The one source for both the advertised schema and the write check (#218).
+        Other columns (dates, categories, mixed) are left out and not checked."""
+        from pandas.api import types as pt
+        df = getattr(el, "value", None)
+        out: dict = {}
+        for c in getattr(df, "columns", []):
+            col = df[c]
+            if pt.is_bool_dtype(col):
+                out[str(c)] = "boolean"
+            elif pt.is_integer_dtype(col):
+                out[str(c)] = "integer"
+            elif pt.is_float_dtype(col):
+                out[str(c)] = "number"
+            elif pt.is_string_dtype(col) or pt.is_object_dtype(col):
+                vals = col.dropna()
+                if len(vals) and all(isinstance(v, str) for v in vals):
+                    out[str(c)] = "string"
+        return out
+
+    @staticmethod
+    def _cell_value(column: str, typ: Optional[str], v: Any, where: str) -> Any:
+        """A cell value checked against its column's type, as the browser's cell editor would.
+        Streamlit itself coerces a misfit to NaN with only a stderr traceback, so the edit has to
+        be rejected here, before anything is written (#218). null clears the cell."""
+        if v is None or typ is None:
+            return v
+        num = isinstance(v, (int, float)) and not isinstance(v, bool)
+        if typ == "integer":
+            if num and float(v).is_integer():
+                return int(v)
+            want = "an integer"
+        elif typ == "number":
+            if num:
+                return v
+            want = "a number"
+        elif typ == "boolean":
+            if isinstance(v, bool):
+                return v
+            want = "true or false"
+        else:
+            if isinstance(v, str):
+                return v
+            want = "a string"
+        raise RuntimeError_(f"{column} in {where} must be {want}; got {v!r}")
+
     def _state_key(self, el) -> str:
         """Where an editor's edit state lives in session_state: its key, else its widget id."""
         return getattr(el, "key", None) or self._widget_id(el)
@@ -410,6 +461,7 @@ class AppTestRuntime:
                 columns=([str(c) for c in getattr(el.value, "columns", [])]
                          if kind == "data_editor" else None),
                 dynamic=(self._editing_mode(el) == "DYNAMIC") if kind == "data_editor" else None,
+                column_types=self._column_types(el) if kind == "data_editor" else None,
             )
             for kind, idx, el in self._iter_widgets()
         ]
@@ -832,7 +884,8 @@ class AppTestRuntime:
         if value is None:
             merged = copy.deepcopy(_EMPTY_EDITS)
         else:
-            merged = self._merge_edits(identifier, value, base, n_rows, columns, dynamic)
+            merged = self._merge_edits(identifier, value, base, n_rows, columns, dynamic,
+                                       self._column_types(el))
         if form:  # held until the form's submit, like any other form field
             self._hold_for_submit(form, el, merged)
             return
@@ -848,7 +901,9 @@ class AppTestRuntime:
                 pass
             raise RuntimeError_(f"editing {identifier!r} failed and was rolled back: {e}") from e
 
-    def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic) -> dict:
+    def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic,
+                     types=None) -> dict:
+        types = types or {}
         usage = (f'data_editor {identifier!r} takes {{"edit": {{row: {{column: value}}}}, '
                  f'"add": [{{column: value}}], "delete": [row]}}, or null to reset')
         if not isinstance(value, dict) or not value or set(value) - set(self._EDIT_OPS):
@@ -876,7 +931,7 @@ class AppTestRuntime:
             if unknown:
                 raise RuntimeError_(f"unknown column(s) {unknown} in {where}; "
                                     f"{identifier!r} has columns {columns}")
-            return dict(d)
+            return {c: self._cell_value(c, types.get(c), v, where) for c, v in d.items()}
 
         edit, add, delete = (value.get(op) for op in self._EDIT_OPS)
         if edit is not None and not isinstance(edit, dict):
