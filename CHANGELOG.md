@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.2 (2026-11-20)
+
+- **Fix:** a `data_editor` cell ignored the app's `column_config` value rules (#220). A
+  `SelectboxColumn` cell took any string, and a `NumberColumn` cell took numbers past its
+  `min_value`/`max_value`. A browser's cell editor can't produce either, yet both were stored and
+  reported as success. Both are now rejected with the table left as it was, using the same
+  messages as a standalone `selectbox` / `number_input`:
+  `'BOGUS' is not a valid option for status in edit of row 0; choose one of ['open', 'closed']`.
+  The rules are advertised in `constraints.column_rules` and in the widget schema (`enum`,
+  `minimum`, `maximum`). Other `column_config` settings, such as `step`, `disabled` and
+  `required`, aren't checked.
+
 ## 0.15.1 (2026-11-19)
 
 - **Fix:** a `data_editor` cell value wasn't checked against its column's type (#218). A string

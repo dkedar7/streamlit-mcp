@@ -191,6 +191,9 @@ class WidgetSnapshot:
     dynamic: Optional[bool] = None
     # data_editor only: {column: JSON type} for the columns whose cells are type-checked (#218).
     column_types: Optional[dict] = None
+    # data_editor only: {column: {"options": [...]} | {"min": x, "max": y}} from the app's
+    # column_config SelectboxColumn / NumberColumn (#220).
+    column_rules: Optional[dict] = None
 
 
 @dataclass
@@ -340,7 +343,54 @@ class AppTestRuntime:
         return out
 
     @staticmethod
-    def _cell_value(column: str, typ: Optional[str], v: Any, where: str) -> Any:
+    def _column_rules(el) -> dict:
+        """{column: rule} for the value rules the app set in column_config, which a browser's cell
+        editor enforces: a SelectboxColumn's options (a dropdown, no free text) and a
+        NumberColumn's min_value/max_value. The one source for the advertised constraints and the
+        write check (#220). Other column_config settings aren't checked."""
+        import json
+        try:
+            config = json.loads(getattr(getattr(el, "proto", None), "columns", "") or "{}")
+        except ValueError:
+            return {}
+        columns = {str(c) for c in getattr(getattr(el, "value", None), "columns", [])}
+        out: dict = {}
+        for col, cfg in config.items() if isinstance(config, dict) else ():
+            tc = cfg.get("type_config") if isinstance(cfg, dict) else None
+            if col not in columns or not isinstance(tc, dict):
+                continue
+            if tc.get("type") == "selectbox" and isinstance(tc.get("options"), list):
+                out[col] = {"options": list(tc["options"])}
+            elif tc.get("type") == "number":
+                rule = {k: tc[src] for k, src in (("min", "min_value"), ("max", "max_value"))
+                        if isinstance(tc.get(src), (int, float)) and not isinstance(tc[src], bool)}
+                if rule:
+                    out[col] = rule
+        return out
+
+    @classmethod
+    def _cell_value(cls, column: str, typ: Optional[str], v: Any, where: str,
+                    rule: Optional[dict] = None) -> Any:
+        """A cell value checked against its column's type and column_config rule (#218, #220)."""
+        v = cls._cell_type(column, typ, v, where)
+        if v is None or not rule:
+            return v
+        if "options" in rule and v not in rule["options"]:
+            raise RuntimeError_(f"{v!r} is not a valid option for {column} in {where}; "
+                                f"choose one of {rule['options']}")
+        num = isinstance(v, (int, float)) and not isinstance(v, bool)
+        if ("min" in rule or "max" in rule) and not num:
+            raise RuntimeError_(f"{column} in {where} must be a number; got {v!r}")
+        if "min" in rule and v < rule["min"]:
+            raise RuntimeError_(f"{v!r} is out of range for {column} in {where}: "
+                                f"minimum is {rule['min']}")
+        if "max" in rule and v > rule["max"]:
+            raise RuntimeError_(f"{v!r} is out of range for {column} in {where}: "
+                                f"maximum is {rule['max']}")
+        return v
+
+    @staticmethod
+    def _cell_type(column: str, typ: Optional[str], v: Any, where: str) -> Any:
         """A cell value checked against its column's type, as the browser's cell editor would.
         Streamlit itself coerces a misfit to NaN with only a stderr traceback, so the edit has to
         be rejected here, before anything is written (#218). null clears the cell."""
@@ -462,6 +512,7 @@ class AppTestRuntime:
                          if kind == "data_editor" else None),
                 dynamic=(self._editing_mode(el) == "DYNAMIC") if kind == "data_editor" else None,
                 column_types=self._column_types(el) if kind == "data_editor" else None,
+                column_rules=self._column_rules(el) if kind == "data_editor" else None,
             )
             for kind, idx, el in self._iter_widgets()
         ]
@@ -885,7 +936,7 @@ class AppTestRuntime:
             merged = copy.deepcopy(_EMPTY_EDITS)
         else:
             merged = self._merge_edits(identifier, value, base, n_rows, columns, dynamic,
-                                       self._column_types(el))
+                                       self._column_types(el), self._column_rules(el))
         if form:  # held until the form's submit, like any other form field
             self._hold_for_submit(form, el, merged)
             return
@@ -902,8 +953,8 @@ class AppTestRuntime:
             raise RuntimeError_(f"editing {identifier!r} failed and was rolled back: {e}") from e
 
     def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic,
-                     types=None) -> dict:
-        types = types or {}
+                     types=None, rules=None) -> dict:
+        types, rules = types or {}, rules or {}
         usage = (f'data_editor {identifier!r} takes {{"edit": {{row: {{column: value}}}}, '
                  f'"add": [{{column: value}}], "delete": [row]}}, or null to reset')
         if not isinstance(value, dict) or not value or set(value) - set(self._EDIT_OPS):
@@ -931,7 +982,8 @@ class AppTestRuntime:
             if unknown:
                 raise RuntimeError_(f"unknown column(s) {unknown} in {where}; "
                                     f"{identifier!r} has columns {columns}")
-            return {c: self._cell_value(c, types.get(c), v, where) for c, v in d.items()}
+            return {c: self._cell_value(c, types.get(c), v, where, rules.get(c))
+                    for c, v in d.items()}
 
         edit, add, delete = (value.get(op) for op in self._EDIT_OPS)
         if edit is not None and not isinstance(edit, dict):

@@ -240,3 +240,58 @@ def test_cli_strict_rejects_a_misfit_cell(tmp_path, capsys):
     assert main(["call", str(app), "--set", 'grid={"edit": {"0": {"qty": "nope"}}}',
                  "--strict"]) == 1
     assert "must be an integer" in capsys.readouterr().err
+
+
+CONFIG_APP = (
+    "import streamlit as st, pandas as pd\n"
+    "df = pd.DataFrame({'item': ['a', 'b'], 'qty': [1, 2], 'status': ['open', 'open'],\n"
+    "                   'price': [1.5, 2.5]})\n"
+    "ed = st.data_editor(df, num_rows='dynamic', key='grid', column_config={\n"
+    "    'qty': st.column_config.NumberColumn('Quantity', min_value=0, max_value=10),\n"
+    "    'status': st.column_config.SelectboxColumn('Status', options=['open', 'closed']),\n"
+    "    'price': st.column_config.NumberColumn(min_value=0.5),\n"
+    "    'item': st.column_config.TextColumn('Item'),\n"
+    "})\n"
+    "st.metric('Qty', int(ed['qty'].sum()))\n"
+    "st.metric('Closed', int((ed['status'] == 'closed').sum()))\n"
+)
+
+
+def test_column_config_rules_are_advertised_in_constraints_and_schema():
+    """SelectboxColumn options and NumberColumn bounds are visible before a write (#220)."""
+    w = _editor(_engine(CONFIG_APP))
+    assert w["constraints"]["column_rules"] == {
+        "qty": {"min": 0, "max": 10}, "status": {"options": ["open", "closed"]},
+        "price": {"min": 0.5}}  # a TextColumn has no value rule
+    props = w["schema"]["properties"]["value"]["properties"]["edit"]["additionalProperties"][
+        "properties"]
+    assert props["qty"] == {"type": ["integer", "null"], "minimum": 0, "maximum": 10}
+    assert props["status"] == {"type": ["string", "null"], "enum": ["open", "closed", None]}
+    assert props["price"] == {"type": ["number", "null"], "minimum": 0.5}
+
+
+@pytest.mark.parametrize("bad, msg", [
+    ({"edit": {"0": {"status": "BOGUS"}}}, "'BOGUS' is not a valid option for status"),
+    ({"edit": {"0": {"qty": 999}}}, "999 is out of range for qty in edit of row 0: maximum is 10"),
+    ({"edit": {"1": {"qty": -1}}}, "minimum is 0"),
+    ({"edit": {"0": {"price": 0.25}}}, "minimum is 0.5"),
+    ({"add": [{"status": "pending"}]}, "not a valid option for status in added row 0"),
+])
+def test_a_cell_that_breaks_its_column_config_is_rejected_atomically(bad, msg):
+    """A browser's dropdown / bounded number cell can't produce these; standalone selectbox and
+    number_input already reject them, so the editor must too, leaving its edits intact (#220)."""
+    from streamlit_mcp.runtime import RuntimeError_
+    eng = _engine(CONFIG_APP)
+    eng.set_widget("grid", {"edit": {"1": {"qty": 5, "status": "closed"}}})
+    before = _editor(eng)["value"]["edits"]
+    with pytest.raises(RuntimeError_, match=msg):
+        eng.set_widget("grid", bad)
+    assert _editor(eng)["value"]["edits"] == before
+    assert _metric(eng) == ["Qty: 6", "Closed: 1"]
+
+
+def test_cells_within_their_column_config_are_accepted():
+    eng = _engine(CONFIG_APP)
+    eng.set_widget("grid", {"edit": {"0": {"qty": 10, "status": "closed", "price": 0.5}},
+                            "add": [{"item": "c", "qty": 0, "status": None}]})
+    assert _metric(eng) == ["Qty: 12", "Closed: 1"]
