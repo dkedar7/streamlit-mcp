@@ -85,6 +85,8 @@ def _constraints(w: WidgetSnapshot) -> dict:
         c["dynamic"] = bool(w.dynamic)  # whether rows can be added/deleted
         if w.column_types:  # what each type-checked column's cells take (#218)
             c["column_types"] = dict(w.column_types)
+        if w.column_rules:  # the app's column_config options / bounds, enforced on write (#220)
+            c["column_rules"] = {k: dict(r) for k, r in w.column_rules.items()}
     return c
 
 
@@ -264,9 +266,17 @@ def tool_schema_for(model: dict) -> dict:
     elif kind == "data_editor":
         # Edits in Streamlit's own protocol; row numbers are positions in the app's original data.
         cols = list(c.get("columns", []))
-        types = c.get("column_types") or {}
-        cell = {"type": "object", "propertyNames": {"enum": cols},
-                "properties": {k: {"type": [t, "null"]} for k, t in types.items()}}
+        types, rules = c.get("column_types") or {}, c.get("column_rules") or {}
+        props: dict = {k: {"type": [t, "null"]} for k, t in types.items()}
+        for k, r in rules.items():  # column_config options / bounds (#220)
+            p = props.setdefault(k, {})
+            if "options" in r:
+                p["enum"] = list(r["options"]) + [None]
+            if "min" in r:
+                p["minimum"] = r["min"]
+            if "max" in r:
+                p["maximum"] = r["max"]
+        cell = {"type": "object", "propertyNames": {"enum": cols}, "properties": props}
         ops: dict = {"edit": {"type": "object", "additionalProperties": cell,
                               "description": "row number -> {column: new value}"}}
         if c.get("dynamic"):

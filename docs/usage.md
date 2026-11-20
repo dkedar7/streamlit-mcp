@@ -66,7 +66,10 @@ Edits accumulate, and `null` resets the table. Adding or deleting rows needs
 rejected without changing anything. So is a cell value that doesn't fit its column, as in a
 browser's cell editor: integer, number, boolean and all-string columns are listed in
 `constraints.column_types` (and in the schema), and `null` clears a cell. Other columns, such as
-dates, are passed through unchecked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
+dates, are passed through unchecked. The app's `column_config` value rules are enforced too: a
+`SelectboxColumn` cell must be one of its `options`, and a `NumberColumn` cell must be within its
+`min_value`/`max_value`. They're listed in `constraints.column_rules` (and in the schema as
+`enum`/`minimum`/`maximum`). Other `column_config` settings aren't checked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
 AppTest never holds the edited table, so read the result from what the app renders. Inside an
 `st.form`, edits are held until the submit, like any other field.
 
