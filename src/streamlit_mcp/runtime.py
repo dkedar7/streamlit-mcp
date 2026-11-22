@@ -194,6 +194,9 @@ class WidgetSnapshot:
     # data_editor only: {column: {"options": [...]} | {"min": x, "max": y}} from the app's
     # column_config SelectboxColumn / NumberColumn (#220).
     column_rules: Optional[dict] = None
+    # data_editor only: columns the app made read-only (disabled=[...] or column_config
+    # disabled=True), which a browser user can't edit (#223).
+    disabled_columns: Optional[list] = None
 
 
 @dataclass
@@ -343,19 +346,34 @@ class AppTestRuntime:
         return out
 
     @staticmethod
-    def _column_rules(el) -> dict:
-        """{column: rule} for the value rules the app set in column_config, which a browser's cell
-        editor enforces: a SelectboxColumn's options (a dropdown, no free text) and a
-        NumberColumn's min_value/max_value. The one source for the advertised constraints and the
-        write check (#220). Other column_config settings aren't checked."""
+    def _column_config(el) -> dict:
+        """The app's column_config for an editor, as Streamlit sends it (proto.columns JSON)."""
         import json
         try:
             config = json.loads(getattr(getattr(el, "proto", None), "columns", "") or "{}")
         except ValueError:
             return {}
+        return config if isinstance(config, dict) else {}
+
+    @classmethod
+    def _disabled_columns(cls, el) -> list:
+        """Columns a browser shows read-only: st.data_editor(disabled=[...]) and column_config
+        disabled=True both arrive as `disabled: true` in the column config (#223)."""
+        columns = [str(c) for c in getattr(getattr(el, "value", None), "columns", [])]
+        config = cls._column_config(el)
+        return [c for c in columns
+                if isinstance(config.get(c), dict) and config[c].get("disabled") is True]
+
+    @classmethod
+    def _column_rules(cls, el) -> dict:
+        """{column: rule} for the value rules the app set in column_config, which a browser's cell
+        editor enforces: a SelectboxColumn's options (a dropdown, no free text) and a
+        NumberColumn's min_value/max_value. The one source for the advertised constraints and the
+        write check (#220). Other column_config settings aren't checked."""
+        config = cls._column_config(el)
         columns = {str(c) for c in getattr(getattr(el, "value", None), "columns", [])}
         out: dict = {}
-        for col, cfg in config.items() if isinstance(config, dict) else ():
+        for col, cfg in config.items():
             tc = cfg.get("type_config") if isinstance(cfg, dict) else None
             if col not in columns or not isinstance(tc, dict):
                 continue
@@ -513,6 +531,7 @@ class AppTestRuntime:
                 dynamic=(self._editing_mode(el) == "DYNAMIC") if kind == "data_editor" else None,
                 column_types=self._column_types(el) if kind == "data_editor" else None,
                 column_rules=self._column_rules(el) if kind == "data_editor" else None,
+                disabled_columns=self._disabled_columns(el) if kind == "data_editor" else None,
             )
             for kind, idx, el in self._iter_widgets()
         ]
@@ -926,6 +945,10 @@ class AppTestRuntime:
                 value = json.loads(value)
             except ValueError:
                 pass
+        if value is not None and bool(getattr(getattr(el, "proto", None), "disabled", False)):
+            # AppTest's own guard never runs here: edits go through session_state (#223).
+            raise RuntimeError_("Cannot update a disabled data_editor widget. A browser user "
+                                "cannot interact with a disabled widget.")
         n_rows = len(self._table_rows(el))
         columns = [str(c) for c in getattr(el.value, "columns", [])]
         dynamic = self._editing_mode(el) == "DYNAMIC"
@@ -936,7 +959,8 @@ class AppTestRuntime:
             merged = copy.deepcopy(_EMPTY_EDITS)
         else:
             merged = self._merge_edits(identifier, value, base, n_rows, columns, dynamic,
-                                       self._column_types(el), self._column_rules(el))
+                                       self._column_types(el), self._column_rules(el),
+                                       self._disabled_columns(el))
         if form:  # held until the form's submit, like any other form field
             self._hold_for_submit(form, el, merged)
             return
@@ -953,8 +977,8 @@ class AppTestRuntime:
             raise RuntimeError_(f"editing {identifier!r} failed and was rolled back: {e}") from e
 
     def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic,
-                     types=None, rules=None) -> dict:
-        types, rules = types or {}, rules or {}
+                     types=None, rules=None, disabled=None) -> dict:
+        types, rules, disabled = types or {}, rules or {}, disabled or []
         usage = (f'data_editor {identifier!r} takes {{"edit": {{row: {{column: value}}}}, '
                  f'"add": [{{column: value}}], "delete": [row]}}, or null to reset')
         if not isinstance(value, dict) or not value or set(value) - set(self._EDIT_OPS):
@@ -982,6 +1006,12 @@ class AppTestRuntime:
             if unknown:
                 raise RuntimeError_(f"unknown column(s) {unknown} in {where}; "
                                     f"{identifier!r} has columns {columns}")
+            # A browser shows a disabled column read-only, in added rows too: it stays empty.
+            locked = [c for c in d if c in disabled and (where.startswith("edit")
+                                                          or d[c] is not None)]
+            if locked:
+                raise RuntimeError_(f"column(s) {locked} of {identifier!r} are disabled and can't "
+                                    f"be edited ({where})")
             return {c: self._cell_value(c, types.get(c), v, where, rules.get(c))
                     for c, v in d.items()}
 

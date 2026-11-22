@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.3 (2026-11-22)
+
+- **Fix:** a disabled `data_editor`, or a disabled column, could still be edited (#223). The edit
+  landed and the call reported success, though a browser shows both read-only. AppTest's
+  disabled-widget guard never ran, because editor edits go through `session_state`.
+  - A whole editor built with `disabled=True` now rejects every edit with the standard
+    disabled-widget message. `null` (a reset) is still allowed.
+  - A column disabled with `disabled=[...]` or `column_config` `disabled=True` rejects edits,
+    including clearing a cell. In an added row, its cells must stay empty.
+  - Disabled columns are listed in `constraints.disabled_columns` and left out of the write
+    schema.
+  - `step` and `required` still aren't checked.
+
 ## 0.15.2 (2026-11-20)
 
 - **Fix:** a `data_editor` cell ignored the app's `column_config` value rules (#220). A

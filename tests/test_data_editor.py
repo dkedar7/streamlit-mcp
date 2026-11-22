@@ -295,3 +295,56 @@ def test_cells_within_their_column_config_are_accepted():
     eng.set_widget("grid", {"edit": {"0": {"qty": 10, "status": "closed", "price": 0.5}},
                             "add": [{"item": "c", "qty": 0, "status": None}]})
     assert _metric(eng) == ["Qty: 12", "Closed: 1"]
+
+
+DISABLED_APP = (
+    "import streamlit as st, pandas as pd\n"
+    "df = pd.DataFrame({'name': ['a', 'b'], 'locked': [10, 20], 'frozen': [1, 2], 'qty': [1, 2]})\n"
+    "ed = st.data_editor(df, key='grid', num_rows='dynamic', disabled=['frozen'],\n"
+    "                    column_config={'locked': st.column_config.NumberColumn(disabled=True)})\n"
+    "whole = st.data_editor(pd.DataFrame({'x': [1]}), key='whole', disabled=True)\n"
+    "st.metric('Sum', int(ed['locked'].sum() + ed['frozen'].sum() + ed['qty'].sum()))\n"
+    "st.metric('X', int(whole['x'].sum()))\n"
+)
+
+
+def _editors(eng):
+    return {w["identifier"]: w for w in eng.list_widgets()["widgets"]
+            if w["kind"] == "data_editor"}
+
+
+def test_disabled_columns_are_advertised_and_left_out_of_the_schema():
+    """Both ways an app makes a column read-only are surfaced, and the write schema doesn't
+    offer them, so a schema-following agent never tries the write (#223)."""
+    w = _editors(_engine(DISABLED_APP))["grid"]
+    assert w["constraints"]["disabled_columns"] == ["locked", "frozen"]
+    cell = w["schema"]["properties"]["value"]["properties"]["edit"]["additionalProperties"]
+    assert cell["propertyNames"]["enum"] == ["name", "qty"]
+    assert set(cell["properties"]) == {"name", "qty"}
+
+
+@pytest.mark.parametrize("ident, bad, msg", [
+    ("grid", {"edit": {"0": {"locked": 777}}}, r"column\(s\) \['locked'\] of 'grid' are disabled"),
+    ("grid", {"edit": {"1": {"frozen": 9, "qty": 3}}}, r"\['frozen'\] .* \(edit of row 1\)"),
+    ("grid", {"edit": {"0": {"locked": None}}}, "are disabled"),  # clearing is an edit too
+    ("grid", {"add": [{"name": "c", "locked": 5}]}, r"\(added row 0\)"),
+    ("whole", {"edit": {"0": {"x": 9}}}, "Cannot update a disabled data_editor widget"),
+])
+def test_a_write_to_a_disabled_editor_or_column_is_rejected_atomically(ident, bad, msg):
+    """A browser shows these read-only; the write used to land and report success (#223)."""
+    from streamlit_mcp.runtime import RuntimeError_
+    eng = _engine(DISABLED_APP)
+    eng.set_widget("grid", {"edit": {"0": {"qty": 5}}})
+    before = {k: w["value"]["edits"] for k, w in _editors(eng).items()}
+    with pytest.raises(RuntimeError_, match=msg):
+        eng.set_widget(ident, bad)
+    assert {k: w["value"]["edits"] for k, w in _editors(eng).items()} == before
+    assert _metric(eng) == ["Sum: 40", "X: 1"]
+
+
+def test_enabled_columns_of_an_editor_with_disabled_ones_stay_writable():
+    eng = _engine(DISABLED_APP)
+    eng.set_widget("grid", {"edit": {"0": {"qty": 5}}, "add": [{"name": "c", "qty": 1}]})
+    assert _metric(eng) == ["Sum: 41", "X: 1"]  # the added row's disabled cells stay empty
+    eng.set_widget("whole", None)  # resetting a disabled editor writes nothing; it's allowed
+    assert _metric(eng) == ["Sum: 41", "X: 1"]

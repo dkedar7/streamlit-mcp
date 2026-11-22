@@ -87,6 +87,8 @@ def _constraints(w: WidgetSnapshot) -> dict:
             c["column_types"] = dict(w.column_types)
         if w.column_rules:  # the app's column_config options / bounds, enforced on write (#220)
             c["column_rules"] = {k: dict(r) for k, r in w.column_rules.items()}
+        if w.disabled_columns:  # read-only columns, rejected on write (#223)
+            c["disabled_columns"] = list(w.disabled_columns)
     return c
 
 
@@ -265,10 +267,13 @@ def tool_schema_for(model: dict) -> dict:
         return {"type": "object", "properties": {}, "description": "click action; no value"}
     elif kind == "data_editor":
         # Edits in Streamlit's own protocol; row numbers are positions in the app's original data.
-        cols = list(c.get("columns", []))
+        locked = set(c.get("disabled_columns") or [])  # read-only columns aren't writable (#223)
+        cols = [k for k in c.get("columns", []) if k not in locked]
         types, rules = c.get("column_types") or {}, c.get("column_rules") or {}
-        props: dict = {k: {"type": [t, "null"]} for k, t in types.items()}
+        props: dict = {k: {"type": [t, "null"]} for k, t in types.items() if k not in locked}
         for k, r in rules.items():  # column_config options / bounds (#220)
+            if k in locked:
+                continue
             p = props.setdefault(k, {})
             if "options" in r:
                 p["enum"] = list(r["options"]) + [None]
