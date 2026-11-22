@@ -69,7 +69,12 @@ browser's cell editor: integer, number, boolean and all-string columns are liste
 dates, are passed through unchecked. The app's `column_config` value rules are enforced too: a
 `SelectboxColumn` cell must be one of its `options`, and a `NumberColumn` cell must be within its
 `min_value`/`max_value`. They're listed in `constraints.column_rules` (and in the schema as
-`enum`/`minimum`/`maximum`). Other `column_config` settings aren't checked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
+`enum`/`minimum`/`maximum`). A disabled column, set with `disabled=[...]` or
+`column_config` `disabled=True`, is read-only as in a browser. It's listed in
+`constraints.disabled_columns` and left out of the write schema; in an added row it stays empty.
+A whole editor built with `disabled=True` rejects every edit, like any disabled widget, though
+`null` (a reset) is allowed. Other `column_config` settings, such as `step` and `required`,
+aren't checked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
 AppTest never holds the edited table, so read the result from what the app renders. Inside an
 `st.form`, edits are held until the submit, like any other field.
 
