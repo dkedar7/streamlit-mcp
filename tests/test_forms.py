@@ -104,3 +104,76 @@ def test_cli_documented_form_flow(tmp_path, capsys):
                "--click", "Submit", "--read"])
     assert rc == 0
     assert "[success] Submitted name='Kedar' age=30" in capsys.readouterr().out
+
+
+CLEAR_APP = (
+    "import streamlit as st\n"
+    "import pandas as pd\n"
+    "st.selectbox('Mode', ['a', 'b'], key='mode')\n"
+    "with st.form('signup', clear_on_submit=True):\n"
+    "    nm = st.text_input('FormName', key='fn')\n"
+    "    qty = st.number_input('FormQty', 0, 10, 0, key='fq')\n"
+    "    tags = st.multiselect('Tags', ['x', 'y'], default=['x'], key='tg')\n"
+    "    opt = st.text_input('Opt', value=None, key='op')\n"
+    "    grid = st.data_editor(pd.DataFrame({'n': [1]}), key='grid')\n"
+    "    submitted = st.form_submit_button('Submit')\n"
+    "with st.form('keep'):\n"
+    "    kept = st.text_input('Keep', key='kp')\n"
+    "    st.form_submit_button('Save')\n"
+    "if submitted:\n"
+    "    st.success(f'Got {nm!r} qty={qty} tags={tags} opt={opt!r} n={int(grid.n.sum())}')\n"
+)
+CLEARED = {"fn": "", "fq": 0, "tg": ["x"], "op": None}
+
+
+@pytest.fixture
+def clear_eng():
+    from streamlit_mcp.engine import Engine
+    from streamlit_mcp.runtime import AppTestRuntime
+    rt = AppTestRuntime(script=CLEAR_APP)
+    rt.run()
+    return Engine(rt)
+
+
+def _values(eng):
+    return {w["identifier"]: w["value"] for w in eng.list_widgets()["widgets"]
+            if w["kind"] != "button"}
+
+
+def _fill_and_submit(eng):
+    for k, v in (("fn", "zoe"), ("fq", 3), ("tg", ["y"]), ("op", "hi"), ("kp", "kept")):
+        eng.set_widget(k, v)
+    eng.set_widget("grid", {"edit": {"0": {"n": 5}}})
+    eng.click("Save")
+    return eng.click("Submit")
+
+
+def test_clear_on_submit_fields_read_as_their_defaults_after_the_submit(clear_eng):
+    """A browser resets a clear_on_submit form's fields after Submit; AppTest has no frontend,
+    so they kept the submitted values on every later read (#225). The submit itself still sees
+    the submitted values."""
+    out = _fill_and_submit(clear_eng)
+    assert _texts(out, "success") == ["Got 'zoe' qty=3 tags=['y'] opt='hi' n=5"]
+    values = _values(clear_eng)
+    assert {k: values[k] for k in CLEARED} == CLEARED
+    assert values["grid"]["edits"] == {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
+    assert values["kp"] == "kept"  # a form without clear_on_submit keeps its values
+
+
+def test_session_state_keeps_the_submitted_values_until_the_next_submit(clear_eng):
+    """As in a browser: the cleared values are unsubmitted form values, so session_state still
+    holds what was submitted, and a rerun outside the form doesn't change either."""
+    out = _fill_and_submit(clear_eng)
+    assert {k: out["session_state"][k] for k in CLEARED} == {
+        "fn": "zoe", "fq": 3, "tg": ["y"], "op": "hi"}
+    clear_eng.set_widget("mode", "b")
+    values = _values(clear_eng)
+    assert {k: values[k] for k in CLEARED} == CLEARED
+
+
+def test_the_next_submit_sends_the_cleared_defaults_unless_fields_are_set_again(clear_eng):
+    _fill_and_submit(clear_eng)
+    assert _texts(clear_eng.click("Submit"), "success") == ["Got '' qty=0 tags=['x'] opt=None n=1"]
+    clear_eng.set_widget("fn", "amy")
+    assert _texts(clear_eng.click("Submit"), "success") == [
+        "Got 'amy' qty=0 tags=['x'] opt=None n=1"]

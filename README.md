@@ -105,7 +105,8 @@ their two-handle **range** forms (`st.slider("Price", 0, 100, (20, 80))`,
 `[low, high]`. An `st.form` is driven the way a human drives it: set the fields, then click the
 form's submit button. As in a browser, the fields are held until Submit sends them together.
 Each field and submit button reports the `form` it belongs to, so in an app with several forms
-an agent clicks the submit whose `form` matches the fields it set.
+an agent clicks the submit whose `form` matches the fields it set. A form built with
+`clear_on_submit=True` reads as cleared after its submit, as in a browser.
 
 An `st.data_editor` reports the app's original `rows` and the `edits` applied so far, and takes
 `{"edit": {"0": {"qty": 5}}, "add": [{"qty": 1}], "delete": [1]}` (row numbers are positions in the

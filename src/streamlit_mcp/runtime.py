@@ -61,6 +61,7 @@ SUPPORTED_KINDS = (
 # what separates it from a read-only st.dataframe is the proto's editing_mode (#204).
 _EDITABLE_MODES = ("FIXED", "DYNAMIC")
 _EMPTY_EDITS = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
+_NO_DEFAULT = object()  # a widget whose default couldn't be read (see _widget_default)
 
 # st.pills and st.segmented_control are the SAME element in the tree — both arrive typed
 # `button_group`, which is why they were once written off as undetectable — but AppTest exposes
@@ -1066,6 +1067,66 @@ class AppTestRuntime:
                         self._set(k, w, held[wid])
         el.click()
         self._run_script()
+        if form and self._clears_on_submit(form):
+            self._clear_form(form)
+
+    def _clears_on_submit(self, form: str) -> bool:
+        """Whether ``st.form(form, clear_on_submit=True)``: read off the form's block proto."""
+        stack = [n for n in (getattr(self.at, "sidebar", None), self.at.main) if n is not None]
+        while stack:
+            node = stack.pop()
+            proto = getattr(node, "proto", None)
+            try:
+                if proto is not None and proto.HasField("form") and proto.form.form_id == form:
+                    return bool(proto.form.clear_on_submit)
+            except ValueError:  # a proto without a `form` field
+                pass
+            children = getattr(node, "children", None)
+            if isinstance(children, dict):
+                stack.extend(children.values())
+        return False
+
+    def _clear_form(self, form: str) -> None:
+        """After a clear_on_submit form's submit, hold each of its fields at its default (#225).
+
+        This is what a browser does. Streamlit's frontend sends the form's values, then fires
+        `formCleared`, and each field resets to its default as a new UNSUBMITTED form value. So
+        the fields read as cleared right away, session_state keeps the submitted values (the
+        submit's own run already used them), and the next submit sends the defaults unless the
+        fields are set again. That is exactly a held value (see _hold_for_submit). AppTest has no
+        frontend, so without this the fields kept the submitted values forever. A field whose
+        default can't be read is left as it is, which was the behavior before."""
+        held = self._pending_forms.setdefault(form, {})
+        for kind, _, w in self._iter_widgets():
+            if kind == "button" or self._form_id(w) != form:
+                continue
+            wid = self._widget_id(w)
+            if kind == "data_editor":
+                held[wid] = copy.deepcopy(_EMPTY_EDITS)
+                continue
+            default = self._widget_default(wid)
+            if default is not _NO_DEFAULT:
+                held[wid] = default
+
+    def _widget_default(self, wid: str) -> Any:
+        """A widget's default value, as Streamlit itself computes it: the widget's registered
+        deserializer applied to "no value from the frontend". session_state is wrapped once by
+        AppTest 1.58 and twice by 1.67, so unwrap `_state` until the widget registry is found."""
+        state = getattr(self.at, "session_state", None)
+        for _ in range(4):
+            try:
+                registry = object.__getattribute__(state, "_new_widget_state")
+            except AttributeError:
+                try:
+                    state = object.__getattribute__(state, "_state")
+                except AttributeError:
+                    return _NO_DEFAULT
+                continue
+            try:
+                return registry.widget_metadata[wid].deserializer(None)
+            except Exception:
+                return _NO_DEFAULT
+        return _NO_DEFAULT
 
     # ----------------------------------------------------------------- helpers
     @staticmethod

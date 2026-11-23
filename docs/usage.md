@@ -94,6 +94,11 @@ AppTest never holds the edited table, so read the result from what the app rende
     and submit button reports the `form` it belongs to (`null` outside a form), so with several
     forms, click the submit whose `form` matches the fields you set.
 
+    A form built with `clear_on_submit=True` clears the way a browser clears it. The submit runs
+    with the values you set, and then its fields read as their defaults. Like any unsubmitted form
+    value, the cleared fields don't reach `session_state` until the next submit, so `session_state`
+    keeps the submitted values until then. To confirm a submit, read the app's output.
+
 !!! note "Atomic writes"
     Setting a `selectbox`/`radio`/`select_slider`/`multiselect` to an option that isn't offered
     (including every handle of a two-handle `select_slider` range), a

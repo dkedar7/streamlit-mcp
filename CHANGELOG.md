@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.4 (2026-11-23)
+
+- **Fix:** a form built with `st.form(..., clear_on_submit=True)` never cleared (#225). After the
+  submit, its fields kept reporting the submitted values on every later read, while a browser
+  shows them reset. AppTest has no frontend, and the frontend is what does the clearing. Now
+  the fields read as their defaults right after the submit, which itself still runs with the
+  submitted values. This matches the browser exactly: Streamlit's frontend resets each field as
+  a new *unsubmitted* form value, so `session_state` keeps the submitted values until the next
+  submit, which sends the defaults unless the fields are set again. Defaults come from each
+  widget's own Streamlit deserializer, and a `data_editor` in the form clears its edits.
+
 ## 0.15.3 (2026-11-22)
 
 - **Fix:** a disabled `data_editor`, or a disabled column, could still be edited (#223). The edit
