@@ -288,8 +288,23 @@ def tool_schema_for(model: dict) -> dict:
             ops["add"] = {"type": "array", "items": cell, "description": "rows to append"}
             ops["delete"] = {"type": "array", "items": {"type": "integer", "minimum": 0},
                              "description": "original row numbers to delete"}
+        # The value the editor reports, {rows, edits}, is accepted back as a write that replaces
+        # the edits, so the reported value is valid against this schema too (#227, as #57).
+        state: dict = {
+            "edited_rows": {"type": "object", "additionalProperties": cell},
+            "added_rows": {"type": "array", "items": cell},
+            "deleted_rows": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        }
+        if not c.get("dynamic"):
+            state["added_rows"]["maxItems"] = state["deleted_rows"]["maxItems"] = 0
+        ops["rows"] = {"type": "array", "items": {"type": "object"},
+                       "description": "the app's data, as read; read-only, so send it unchanged"}
+        ops["edits"] = {"type": ["object", "null"], "properties": state,
+                        "additionalProperties": False,
+                        "description": "the whole edit state, as read; replaces the current edits"}
         value = {"type": ["object", "null"], "properties": ops, "additionalProperties": False,
-                 "description": "edits accumulate; null resets the table to the app's data"}
+                 "description": "edit/add/delete accumulate; the value as read ({rows, edits}) "
+                                "replaces the edits; null resets the table to the app's data"}
         return {"type": "object", "properties": {"value": value}, "required": ["value"]}
     else:
         value = {}

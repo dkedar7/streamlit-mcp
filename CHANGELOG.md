@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.5 (2026-11-24)
+
+- **Fix:** a `data_editor`'s reported `value` failed the `schema` it advertises (#227). The value
+  is `{rows, edits}`, but the schema described only the `edit`/`add`/`delete` patch, with
+  `additionalProperties: false`. It was the only widget whose value failed its own schema.
+  - As for every other widget (#57), the value as read is now a valid write: sending
+    `{rows, edits}` back replaces the edit state with the one it holds, so the table read earlier
+    is restored. The edits go through every check a patch does (rows, columns, cell types,
+    `column_config` rules, disabled columns, a fixed set of rows).
+  - `rows` is optional. If it's sent, it must match the app's data, since only `edits` change
+    the table.
+  - The schema gains `rows` and `edits`. `edit`/`add`/`delete` are unchanged and still
+    accumulate, so existing callers aren't affected.
+  - An empty disabled cell in an added row is no longer stored, so the state stays within the
+    schema.
+
 ## 0.15.4 (2026-11-23)
 
 - **Fix:** a form built with `st.form(..., clear_on_submit=True)` never cleared (#225). After the

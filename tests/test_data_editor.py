@@ -52,7 +52,7 @@ def test_the_editor_is_a_widget_and_a_plain_dataframe_stays_an_output():
                           "edits": {"edited_rows": {}, "added_rows": [], "deleted_rows": []}}
     assert w["constraints"] == {"columns": ["qty", "price"], "dynamic": True,
                                 "column_types": {"qty": "integer", "price": "integer"}}
-    assert set(w["schema"]["properties"]["value"]["properties"]) == {"edit", "add", "delete"}
+    assert set(w["schema"]["properties"]["value"]["properties"]) == {"edit", "add", "delete", "rows", "edits"}
     outputs = eng.read_output()["outputs"]
     assert [o["kind"] for o in outputs].count("dataframe") == 1  # only the read-only one (#128)
     assert "qty" not in json.dumps([o for o in outputs if o["kind"] == "dataframe"])
@@ -120,7 +120,7 @@ def test_fixed_rows_take_edits_but_not_add_or_delete():
     eng = _engine(FIXED_APP)
     w = _editor(eng)
     assert w["identifier"] == "data_editor[0]" and w["constraints"]["dynamic"] is False
-    assert set(w["schema"]["properties"]["value"]["properties"]) == {"edit"}
+    assert set(w["schema"]["properties"]["value"]["properties"]) == {"edit", "rows", "edits"}
     eng.set_widget("data_editor[0]", {"edit": {"1": {"qty": 10}}})
     assert _metric(eng) == ["Sum: 11"]
     for op in ({"add": [{"qty": 1}]}, {"delete": [0]}):
@@ -348,3 +348,116 @@ def test_enabled_columns_of_an_editor_with_disabled_ones_stay_writable():
     assert _metric(eng) == ["Sum: 41", "X: 1"]  # the added row's disabled cells stay empty
     eng.set_widget("whole", None)  # resetting a disabled editor writes nothing; it's allowed
     assert _metric(eng) == ["Sum: 41", "X: 1"]
+
+
+# --- #227: the value an editor reports is valid against its own schema, and round-trips ---
+
+EMPTY = {"edited_rows": {}, "added_rows": [], "deleted_rows": []}
+APPS = {"cart": CART_APP, "fixed": FIXED_APP, "form": FORM_APP, "typed": TYPED_APP,
+        "config": CONFIG_APP, "disabled": DISABLED_APP}
+
+
+def _as_received(w):
+    """A widget's value as an agent receives it: through JSON (row numbers become strings)."""
+    return json.loads(json.dumps(w["value"]))
+
+
+def _validate(w):
+    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema.validate(_as_received(w), w["schema"]["properties"]["value"])
+
+
+@pytest.mark.parametrize("app", list(APPS))
+def test_the_reported_value_is_valid_against_its_own_schema(app):
+    """It wasn't: the schema described only the edit/add/delete patch, with
+    additionalProperties false, so {rows, edits} failed it (#227, the #57/#62/#78 class)."""
+    editors = [w for w in _engine(APPS[app]).list_widgets()["widgets"]
+               if w["kind"] == "data_editor"]
+    assert editors
+    for w in editors:
+        _validate(w)
+
+
+def test_the_reported_value_stays_valid_after_edits():
+    eng = _engine(CART_APP)
+    eng.set_widget("cart", {"edit": {"0": {"qty": 5}}, "add": [{"qty": 3, "price": 1}],
+                            "delete": [1]})
+    _validate(_editor(eng))
+    eng = _engine(DISABLED_APP)
+    eng.set_widget("grid", {"add": [{"name": "c", "locked": None}]})
+    w = _editors(eng)["grid"]
+    _validate(w)  # the empty disabled cell isn't kept, so it can't break the schema
+    assert w["value"]["edits"]["added_rows"] == [{"name": "c"}]
+
+
+def test_the_value_as_read_round_trips_through_set_widget():
+    """As for every other widget (#57): what an agent reads, it can send back."""
+    eng = _engine(CART_APP)
+    eng.set_widget("cart", {"edit": {"0": {"qty": 5}}, "add": [{"qty": 3, "price": 1}],
+                            "delete": [1]})
+    read = _as_received(_editor(eng))
+    assert _metric(eng) == ["Total: 53"]
+    eng.set_widget("cart", read)  # sent back unchanged: the same table, not the edits twice
+    assert _as_received(_editor(eng)) == read and _metric(eng) == ["Total: 53"]
+    eng.set_widget("cart", None)
+    assert _metric(eng) == ["Total: 50"]
+    eng.set_widget("cart", read)  # restores the table as read
+    assert _as_received(_editor(eng)) == read and _metric(eng) == ["Total: 53"]
+
+
+def test_the_value_as_read_replaces_the_edits_rather_than_adding_to_them():
+    eng = _engine(CART_APP)
+    eng.set_widget("cart", {"edit": {"0": {"qty": 5}}})
+    rows = _editor(eng)["value"]["rows"]
+    eng.set_widget("cart", {"rows": rows, "edits": {**EMPTY, "edited_rows": {"1": {"qty": 1}}}})
+    assert _editor(eng)["value"]["edits"]["edited_rows"] == {"1": {"qty": 1}}
+    assert _metric(eng) == ["Total: 30"]
+    eng.set_widget("cart", {"edits": EMPTY})  # rows may be left out; no edits is a reset
+    assert _metric(eng) == ["Total: 50"]
+
+
+@pytest.mark.parametrize("bad, msg", [
+    ({"rows": [{"qty": 9, "price": 10}, {"qty": 2, "price": 20}], "edits": EMPTY},
+     "is the app's data and can't be changed"),
+    ({"edits": {"edited_rows": {}, "added": []}}, "must be an object with"),
+    ({"edits": {**EMPTY, "edited_rows": {"0": {"qty": 2}}, "deleted_rows": [0]}},
+     "both edited and deleted"),
+    ({"edits": {**EMPTY, "edited_rows": {"0": {"qty": "x"}}}}, "must be an integer"),
+    ({"edits": {**EMPTY, "edited_rows": {"7": {"qty": 1}}}}, "out of range"),
+    ({"edits": EMPTY, "edit": {"0": {"qty": 1}}}, "takes"),
+])
+def test_a_bad_value_as_read_is_rejected_and_changes_nothing(bad, msg):
+    from streamlit_mcp.runtime import RuntimeError_
+    eng = _engine(CART_APP)
+    eng.set_widget("cart", {"edit": {"0": {"qty": 5}}})
+    before = _editor(eng)["value"]
+    with pytest.raises(RuntimeError_, match=msg):
+        eng.set_widget("cart", bad)
+    assert _editor(eng)["value"] == before and _metric(eng) == ["Total: 90"]
+
+
+def test_a_fixed_editor_takes_no_added_or_deleted_rows_as_read_either():
+    from streamlit_mcp.runtime import RuntimeError_
+    eng = _engine(FIXED_APP)
+    state = _editor(eng)["schema"]["properties"]["value"]["properties"]["edits"]["properties"]
+    assert state["added_rows"]["maxItems"] == 0 and state["deleted_rows"]["maxItems"] == 0
+    with pytest.raises(RuntimeError_, match="fixed set of rows"):
+        eng.set_widget("data_editor[0]", {"edits": {**EMPTY, "added_rows": [{"qty": 1}]}})
+
+
+def test_the_value_as_read_is_held_in_a_form_until_submit():
+    eng = _engine(FORM_APP)
+    eng.set_widget("fe", {"edits": {**EMPTY, "edited_rows": {"0": {"x": 4}}}})
+    assert _metric(eng) == ["X: 1"]
+    eng.click("Go")
+    assert _metric(eng) == ["X: 4"]
+
+
+def test_cli_set_takes_the_value_as_read(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "cart.py"
+    app.write_text(CART_APP)
+    value = {"rows": [{"qty": 1, "price": 10}, {"qty": 2, "price": 20}],
+             "edits": {**EMPTY, "edited_rows": {"1": {"qty": 3}}}}
+    assert main(["call", str(app), "--set", f"cart={json.dumps(value)}", "--read"]) == 0
+    assert "Total: 70" in capsys.readouterr().out
