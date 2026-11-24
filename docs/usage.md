@@ -74,7 +74,10 @@ dates, are passed through unchecked. The app's `column_config` value rules are e
 `constraints.disabled_columns` and left out of the write schema; in an added row it stays empty.
 A whole editor built with `disabled=True` rejects every edit, like any disabled widget, though
 `null` (a reset) is allowed. Other `column_config` settings, such as `step` and `required`,
-aren't checked. Its `value` is `{"rows": <the app's data>, "edits": ...}`.
+aren't checked. Its `value` is `{"rows": <the app's data>, "edits": ...}`, and that value is a
+valid write too, like any widget's: sending it back replaces the edits with the ones it holds, so
+a table read earlier can be restored. `rows` may be left out; if it's sent it must be unchanged,
+since only `edits` change the table.
 AppTest never holds the edited table, so read the result from what the app renders. Inside an
 `st.form`, edits are held until the submit, like any other field.
 

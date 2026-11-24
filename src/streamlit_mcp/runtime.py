@@ -956,6 +956,9 @@ class AppTestRuntime:
         state_key, form = self._state_key(el), self._form_id(el)
         held = self._pending_forms.get(form, {}).get(self._widget_id(el)) if form else None
         base = copy.deepcopy(held or self._table_edits.get(state_key) or _EMPTY_EDITS)
+        if isinstance(value, dict) and value and set(value) <= {"rows", "edits"}:
+            # The editor's own reported value, sent back (#227): it replaces the edit state.
+            value, base = self._state_as_ops(identifier, el, value), copy.deepcopy(_EMPTY_EDITS)
         if value is None:
             merged = copy.deepcopy(_EMPTY_EDITS)
         else:
@@ -977,11 +980,45 @@ class AppTestRuntime:
                 pass
             raise RuntimeError_(f"editing {identifier!r} failed and was rolled back: {e}") from e
 
+    def _state_as_ops(self, identifier: str, el, value: dict) -> Optional[dict]:
+        """The value an editor reports, ``{"rows": ..., "edits": {edited_rows, added_rows,
+        deleted_rows}}``, as the ops that rebuild that edit state from scratch, so it goes through
+        every check a patch does. ``rows`` is the app's data: it's optional, and if it's sent it
+        must be unchanged, since the data can only be changed through ``edits``. Empty edits mean a
+        reset."""
+        import json
+        if "rows" in value:
+            norm = lambda v: json.dumps(v, sort_keys=True, default=str)  # noqa: E731
+            if norm(value["rows"]) != norm(self._table_rows(el)):
+                raise RuntimeError_(f'"rows" of {identifier!r} is the app\'s data and can\'t be '
+                                    'changed; send the changes as "edits" (or use "edit"/"add"/'
+                                    '"delete")')
+        edits = value.get("edits", _EMPTY_EDITS)  # just the app's rows: no edits
+        if edits is None:
+            return None
+        keys = set(_EMPTY_EDITS)
+        if not isinstance(edits, dict) or set(edits) - keys:
+            raise RuntimeError_(f'"edits" of {identifier!r} must be an object with '
+                                f'{sorted(keys)}, as the editor reports it')
+        edited = edits.get("edited_rows") or {}
+        added = edits.get("added_rows") or []
+        deleted = edits.get("deleted_rows") or []
+        if not (isinstance(edited, dict) and isinstance(added, list)
+                and isinstance(deleted, list)):
+            raise RuntimeError_(f'"edits" of {identifier!r} must have an object edited_rows and '
+                                'list added_rows and deleted_rows')
+        both = sorted({str(r) for r in edited} & {str(r) for r in deleted})
+        if both:
+            raise RuntimeError_(f"row(s) {both} of {identifier!r} are both edited and deleted")
+        ops = {op: v for op, v in (("edit", edited), ("add", added), ("delete", deleted)) if v}
+        return ops or None
+
     def _merge_edits(self, identifier, value, base, n_rows, columns, dynamic,
                      types=None, rules=None, disabled=None) -> dict:
         types, rules, disabled = types or {}, rules or {}, disabled or []
         usage = (f'data_editor {identifier!r} takes {{"edit": {{row: {{column: value}}}}, '
-                 f'"add": [{{column: value}}], "delete": [row]}}, or null to reset')
+                 f'"add": [{{column: value}}], "delete": [row]}}, its own value '
+                 f'{{"rows": ..., "edits": ...}} as read, or null to reset')
         if not isinstance(value, dict) or not value or set(value) - set(self._EDIT_OPS):
             raise RuntimeError_(usage)
         n_total = n_rows + len(base["added_rows"])
@@ -1013,8 +1050,9 @@ class AppTestRuntime:
             if locked:
                 raise RuntimeError_(f"column(s) {locked} of {identifier!r} are disabled and can't "
                                     f"be edited ({where})")
+            # An empty disabled cell is left out, so the state stays within the write schema.
             return {c: self._cell_value(c, types.get(c), v, where, rules.get(c))
-                    for c, v in d.items()}
+                    for c, v in d.items() if c not in disabled}
 
         edit, add, delete = (value.get(op) for op in self._EDIT_OPS)
         if edit is not None and not isinstance(edit, dict):
