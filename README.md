@@ -183,7 +183,8 @@ non-zero on an app exception (for CI/scripts).
   good/bad colour — `code`, `json`, `dataframe`, `table`) and charts that carry their own data
   (`st.line_chart`/`bar_chart`/`area_chart`/`scatter_chart`, `altair_chart`, `vega_lite_chart`)
   as kind `chart`, with a one-line summary and the plotted records in `data` (up to 200 points).
-  Plotly, pyplot, maps, images and media are not captured.
+  `st.plotly_chart` is a `chart` too, for its scatter, line and bar traces. Pyplot, maps, images
+  and media are not captured.
 
 ## License
 

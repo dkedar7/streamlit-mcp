@@ -67,7 +67,8 @@ look-but-don't-touch surface, including the higher-level action layer.
   good/bad colour — `code`, `json`, `dataframe`, `table`) and charts that carry their own data
   (`st.line_chart`/`bar_chart`/`area_chart`/`scatter_chart`, `altair_chart`, `vega_lite_chart`)
   as kind `chart`, with a one-line summary and the plotted records in `data` (up to 200 points).
-  Plotly, pyplot, maps, images and media are not captured.
+  `st.plotly_chart` is a `chart` too, for its scatter, line and bar traces. Pyplot, maps, images
+  and media are not captured.
 - **`--allow` and `--redact` filter *state*, not rendered output.** If the app itself renders a
   hidden value into an output (e.g. `st.write(st.session_state["secret"])`), that text is still
   returned. The guardrails govern state and widget access, not what the app chooses to display.
