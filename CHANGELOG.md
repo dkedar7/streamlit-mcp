@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.0 (2026-11-25)
+
+- **New:** `st.plotly_chart` is a `chart` output (#229). It was dropped from every read surface,
+  though Plotly is the charting library Streamlit apps use most and the figure carries its data.
+  - It's read from the figure JSON Streamlit sends, so plotly isn't a dependency. Plotly's
+    base64 typed arrays (how it writes numpy and pandas data) are decoded.
+  - Scatter, line and bar traces become records of `{x, series, value}`, the shape of a native
+    chart of several series, under the same 200-point cap, cut along x. A trace's series is its
+    name, or for a single unnamed trace (Plotly Express) the y-axis title. A horizontal bar reads
+    its categories from `y`.
+  - Other trace types (histogram, box, pie, maps, 3-D) aren't read: a histogram's bars are
+    computed from raw samples, so its samples would misstate what's plotted. The text names them
+    as not captured, so the chart still shows.
+
 ## 0.15.5 (2026-11-24)
 
 - **Fix:** a `data_editor`'s reported `value` failed the `schema` it advertises (#227). The value

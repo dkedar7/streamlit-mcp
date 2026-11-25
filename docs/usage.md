@@ -45,7 +45,15 @@ records, up to 200 of them (a chart of several series is cut along the x-axis, s
 series stays in `data`). A native chart of several series reads
 `{"x": "Jan", "series": "revenue", "value": 10}`; a single series, or a chart given explicit
 columns, keeps the app's column names. `--read` prints the summary; `--json` and MCP include
-`data`. Plotly, pyplot, maps and images are not captured.
+`data`. Pyplot, maps and images are not captured.
+
+An `st.plotly_chart` is a `chart` output too, read from the figure itself (plotly isn't needed by
+streamlit-mcp). Each scatter, line or bar trace is a series, and its records read
+`{"x": "Jan", "series": "revenue", "value": 100}`. The series is the trace's name, or for a single
+unnamed trace (as Plotly Express draws one) the y-axis title, which is the app's column name. A
+horizontal bar's categories are its `x`. Other trace types, such as a histogram (whose bars Plotly
+computes from raw samples), a pie or a map, aren't read; the text names them as not captured, so
+the chart is never silently missing: `plotly pie chart (pie data not captured)`.
 
 Supported widgets: `text_input`, `number_input`, `text_area`, `slider`, `select_slider`,
 `selectbox`, `multiselect`, `checkbox`, `toggle`, `radio`, `button`, `date_input`,

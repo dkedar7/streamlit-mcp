@@ -132,6 +132,30 @@ def _chart_renames(columns: list) -> dict:
                 taken.add(name)
     return renames
 
+
+# Plotly trace types whose points are x/y pairs as plotted. Others are computed from their data
+# (a histogram bins raw samples) or aren't x/y at all (pie, maps, 3-D), so they aren't read.
+_PLOTLY_XY_TRACES = {"scatter", "scattergl", "bar"}
+
+
+def _plotly_array(value) -> Optional[list]:
+    """A Plotly trace's x or y as a list. Plotly writes numpy and pandas data as a typed array,
+    {"dtype": "f8", "bdata": <base64>}, rather than a JSON list; a plain list is used as is."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("bdata"), str):
+        import base64
+
+        import numpy as np
+        dtype = np.dtype(value.get("dtype") or "f8").newbyteorder("<")
+        return np.frombuffer(base64.b64decode(value["bdata"], validate=True), dtype=dtype).tolist()
+    return None
+
+
+def _json_safe(v):
+    """NaN and infinity aren't JSON; a client reads them as null, as pandas' to_json writes them."""
+    return None if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))) else v
+
 # The vega-lite mark a chart draws, named as a person would call the chart. st.scatter_chart draws
 # circles and altair's mark_point draws points; both are scatter plots.
 _CHART_MARKS = {"circle": "scatter", "point": "scatter"}
@@ -550,6 +574,8 @@ class AppTestRuntime:
                 # line/bar/area/scatter_chart, altair_chart and vega_lite_chart. For a dashboard
                 # the chart is the answer, and it was dropped from every surface (#207).
                 outputs.append(self._chart_output(el))
+            elif kind == "plotly_chart":
+                outputs.append(self._plotly_output(el))  # (#229)
         # st.toast is the app's answer to an action ("Saved!") and renders in the event block,
         # outside the sidebar/main tree _walk covers — so it was dropped on every surface even
         # though AppTest exposes it (#170). It floats over the page rather than sitting at a
@@ -632,6 +658,89 @@ class AppTestRuntime:
         elif records:
             text += f" ({total} point{'' if total == 1 else 's'})"
         return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
+
+    @classmethod
+    def _plotly_output(cls, el) -> OutputSnapshot:
+        """An st.plotly_chart as a chart output, in the shape a native chart of several series has:
+        records of {x, series, value}, one series per trace (#229).
+
+        The figure arrives as Plotly's JSON in the proto's `spec`, so plotly itself isn't needed.
+        Only x/y traces (scatter, line, bar) are read: other trace types, such as a histogram
+        (whose bars are computed from raw samples), a pie or a map, are named in the text as not
+        captured, so the chart is never silently missing."""
+        proto = getattr(el, "proto", None)
+        try:
+            fig = json.loads(getattr(proto, "spec", None) or "{}")
+        except Exception:
+            fig = {}
+        fig = fig if isinstance(fig, dict) else {}
+        traces = [t for t in fig.get("data") or [] if isinstance(t, dict)]
+        layout = fig.get("layout") if isinstance(fig.get("layout"), dict) else {}
+        marks = list(dict.fromkeys(cls._plotly_mark(t) for t in traces))
+        label = f"plotly {marks[0]} chart" if len(marks) == 1 else "plotly chart"
+        title = cls._plotly_title(layout.get("title"))
+        if title:
+            label += f" {json.dumps(title)}"
+        skipped = list(dict.fromkeys(t.get("type") or "scatter" for t in traces
+                                     if (t.get("type") or "scatter") not in _PLOTLY_XY_TRACES))
+        try:
+            records = cls._plotly_records(traces, layout)
+        except Exception:
+            return OutputSnapshot(kind="chart", text=f"{label} (data not readable)")
+        not_captured = f"{', '.join(skipped)} data not captured" if skipped else None
+        if not records:
+            return OutputSnapshot(kind="chart", text=f"{label} ({not_captured or 'no data'})")
+        total = len(records)
+        text = f"{label}: {cls._chart_summary(records, 'x', 'value', 'series')}"
+        data, note = cls._cap_chart(records, "x", "series")
+        notes = [f"{total} points; {note}" if note else f"{total} point{'' if total == 1 else 's'}"]
+        if not_captured:
+            notes.append(not_captured)
+        text += "".join(f" ({n})" for n in notes)
+        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
+
+    @staticmethod
+    def _plotly_mark(trace: dict) -> str:
+        """What a person would call the trace: a scatter trace drawn with lines is a line chart
+        (Plotly's default mode draws lines), and other trace types go by their own name."""
+        kind = trace.get("type") or "scatter"
+        if kind in ("scatter", "scattergl"):
+            mode = trace.get("mode")
+            return "line" if not isinstance(mode, str) or "lines" in mode else "scatter"
+        return kind
+
+    @staticmethod
+    def _plotly_title(title) -> Optional[str]:
+        title = title.get("text") if isinstance(title, dict) else title
+        return title if isinstance(title, str) and title else None
+
+    @classmethod
+    def _plotly_records(cls, traces: list, layout: dict) -> list:
+        """{x, series, value} records for each x/y trace, series-major like a native chart. A
+        trace's series is its name, else (an unnamed single trace, as Plotly Express draws one)
+        the y-axis title, which is the app's column name, else ``trace <n>``. A horizontal bar
+        plots its categories on y, so x and y swap. A missing x is the point's position."""
+        xy = [t for t in traces if (t.get("type") or "scatter") in _PLOTLY_XY_TRACES]
+        records: list = []
+        for i, t in enumerate(xy):
+            xs, ys = _plotly_array(t.get("x")), _plotly_array(t.get("y"))
+            horizontal = t.get("orientation") == "h"
+            if horizontal:
+                xs, ys = ys, xs
+                axis = layout.get("xaxis")
+            else:
+                axis = layout.get("yaxis")
+            if ys is None:
+                continue
+            if xs is None:
+                xs = list(range(len(ys)))
+            name = t.get("name") if isinstance(t.get("name"), str) else None
+            if not name and len(xy) == 1:
+                name = cls._plotly_title(axis.get("title")) if isinstance(axis, dict) else None
+            series = name or f"trace {i}"
+            records += [{"x": _json_safe(x), "series": series, "value": _json_safe(y)}
+                        for x, y in zip(xs, ys)]
+        return records
 
     @staticmethod
     def _chart_axes(spec: dict, renames: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
