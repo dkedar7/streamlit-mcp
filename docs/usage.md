@@ -48,7 +48,7 @@ columns, keeps the app's column names. `--read` prints the summary; `--json` and
 `data`. Pyplot, maps and images are not captured.
 
 An `st.plotly_chart` is a `chart` output too, read from the figure itself (plotly isn't needed by
-streamlit-mcp). Each scatter, line or bar trace is a series, and its records read
+streamlit-mcp). Each scatter, line, area or bar trace is a series, and its records read
 `{"x": "Jan", "series": "revenue", "value": 100}`. The series is the trace's name, or for a single
 unnamed trace (as Plotly Express draws one) the y-axis title, which is the app's column name. A
 horizontal bar's categories are its `x`. Other trace types, such as a histogram (whose bars Plotly

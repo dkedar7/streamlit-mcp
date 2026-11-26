@@ -153,3 +153,43 @@ def test_cli_read_shows_the_plotly_chart(tmp_path, capsys):
     assert main(["call", str(app), "--read"]) == 0
     assert "[chart] plotly chart: revenue, cost over Jan, Feb, Mar (6 points)" in (
         capsys.readouterr().out)
+
+
+# --- #231: a filled scatter trace is an area chart, as st.area_chart reads ---
+
+@pytest.mark.parametrize("trace, mark", [
+    ({"mode": "lines", "stackgroup": "1"}, "area"),        # px.area: a stackgroup, no fill
+    ({"fill": "tozeroy"}, "area"),                         # go.Scatter(fill="tozeroy")
+    ({"mode": "lines", "fill": "tonexty"}, "area"),
+    ({"mode": "lines", "stackgroup": "1", "fill": "none"}, "line"),  # stacked, drawn unfilled
+    ({"mode": "lines", "fill": "toself"}, "line"),         # a closed shape, not an area chart
+    ({"mode": "markers", "fill": "none"}, "scatter"),
+])
+def test_a_filled_scatter_trace_is_an_area_chart(trace, mark):
+    """px.area and go.Scatter(fill=...) read "line chart", though st.area_chart reads
+    "area chart" (#231). px.area sets no fill at all: its stackgroup is what fills it."""
+    o = _out({"data": [{"type": "scatter", "name": "v", "x": [1, 2, 3], "y": [4, 5, 6], **trace}]})
+    assert o.text == f"plotly {mark} chart: v over 1, 2, 3 (3 points)"
+
+
+AREA_APP = (
+    "import streamlit as st, pandas as pd, plotly.express as px, plotly.graph_objects as go\n"
+    "df = pd.DataFrame({'t': [1, 2, 3], 'v': [4, 5, 6]})\n"
+    "st.area_chart(df, x='t', y='v')\n"
+    "st.plotly_chart(px.area(df, x='t', y='v'))\n"
+    "f = go.Figure()\n"
+    "f.add_scatter(x=[1, 2, 3], y=[4, 5, 6], fill='tozeroy', name='v')\n"
+    "st.plotly_chart(f)\n"
+)
+
+
+def test_plotly_area_charts_read_like_the_native_one(tmp_path, capsys):
+    pytest.importorskip("plotly")
+    from streamlit_mcp.cli import main
+    app = tmp_path / "area.py"
+    app.write_text(AREA_APP)
+    assert main(["call", str(app), "--read"]) == 0
+    charts = [ln.strip() for ln in capsys.readouterr().out.splitlines() if "[chart]" in ln]
+    assert charts == ["[chart] area chart: v over 1, 2, 3 (3 points)",
+                      "[chart] plotly area chart: v over 1, 2, 3 (3 points)",
+                      "[chart] plotly area chart: v over 1, 2, 3 (3 points)"]

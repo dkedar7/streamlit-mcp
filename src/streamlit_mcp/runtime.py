@@ -136,6 +136,8 @@ def _chart_renames(columns: list) -> dict:
 # Plotly trace types whose points are x/y pairs as plotted. Others are computed from their data
 # (a histogram bins raw samples) or aren't x/y at all (pie, maps, 3-D), so they aren't read.
 _PLOTLY_XY_TRACES = {"scatter", "scattergl", "bar"}
+# Fills that draw an area under (or between) traces, down to an axis or the previous trace.
+_PLOTLY_AREA_FILLS = {"tozeroy", "tozerox", "tonexty", "tonextx", "tonext"}
 
 
 def _plotly_array(value) -> Optional[list]:
@@ -705,6 +707,12 @@ class AppTestRuntime:
         (Plotly's default mode draws lines), and other trace types go by their own name."""
         kind = trace.get("type") or "scatter"
         if kind in ("scatter", "scattergl"):
+            # An area chart is a filled scatter trace, as st.area_chart reads "area chart" (#231).
+            # px.area sets no `fill` but a `stackgroup`, which Plotly fills unless fill is "none".
+            # fill="toself" closes the trace into a shape, which isn't an area chart.
+            fill = trace.get("fill")
+            if fill in _PLOTLY_AREA_FILLS or (trace.get("stackgroup") and fill in (None, "")):
+                return "area"
             mode = trace.get("mode")
             return "line" if not isinstance(mode, str) or "lines" in mode else "scatter"
         return kind
