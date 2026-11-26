@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 (2026-11-26)
+
+- **Fix:** a Plotly area chart read as `plotly line chart`, though `st.area_chart` reads
+  `area chart` (#231). A filled scatter trace is now `plotly area chart`. This covers
+  `go.Scatter(fill="tozeroy")` and the like, and `px.area`, which sets no `fill` but a
+  `stackgroup` that Plotly fills. A stack drawn with `fill="none"`, and a `fill="toself"` shape,
+  keep their line or scatter label. The records were already right.
+
 ## 0.16.0 (2026-11-25)
 
 - **New:** `st.plotly_chart` is a `chart` output (#229). It was dropped from every read surface,
