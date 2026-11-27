@@ -232,6 +232,9 @@ class OutputSnapshot:
     text: str
     # The records behind the output, for kinds whose text can only summarize them (a chart).
     data: Optional[list] = None
+    # Which record key holds a chart's x-axis, its series and its plotted value (#233). The keys
+    # are the app's own column names on some charts, so a reader can't assume them.
+    fields: Optional[dict] = None
 
 
 @dataclass
@@ -659,7 +662,24 @@ class AppTestRuntime:
             text += f" ({total} points; {note})"
         elif records:
             text += f" ({total} point{'' if total == 1 else 's'})"
-        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
+        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data,
+                              fields=cls._chart_fields(records, x, y, color))
+
+    @staticmethod
+    def _chart_fields(records: list, x: Optional[str], y: Optional[str],
+                      color: Optional[str]) -> Optional[dict]:
+        """{"x", "series", "value"}: the record key for each, or null where the chart has none
+        (one series, or a measure with no column, such as an aggregate count). Only keys the
+        records actually carry are named."""
+        if not records:
+            return None
+        columns = set(records[0])
+
+        def key(k: Optional[str]) -> Optional[str]:
+            return k if k in columns else None
+
+        value = key(y) if y not in (x, color) else None
+        return {"x": key(x), "series": key(color), "value": value}
 
     @classmethod
     def _plotly_output(cls, el) -> OutputSnapshot:
@@ -699,7 +719,8 @@ class AppTestRuntime:
         if not_captured:
             notes.append(not_captured)
         text += "".join(f" ({n})" for n in notes)
-        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data)
+        return OutputSnapshot(kind="chart", text=cls._truncate(text), data=data,
+                              fields={"x": "x", "series": "series", "value": "value"})
 
     @staticmethod
     def _plotly_mark(trace: dict) -> str:
