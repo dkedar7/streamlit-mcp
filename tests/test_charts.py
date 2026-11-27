@@ -273,3 +273,50 @@ def test_columns_the_chart_does_not_encode_are_not_reported_as_plotted():
     assert [c["text"] for c in charts] == ["line chart: revenue over Jan, Feb, Mar (3 points)"] * 2 + [
         "bar chart: revenue over Jan, Feb, Mar (3 points)"]
     assert charts[0]["data"][0] == {"month": "Jan", "revenue": 10, "notes": "ok"}  # data untouched
+
+
+# --- #233: every chart says which record key holds its x, series and value ---
+
+FIELDS_APP = (
+    "import streamlit as st, pandas as pd, altair as alt\n"
+    "idx = ['Jan', 'Feb', 'Mar']\n"
+    "st.line_chart(pd.DataFrame({'revenue': [10, 20, 30]}, index=idx))\n"
+    "st.line_chart(pd.DataFrame({'revenue': [10, 20, 30], 'cost': [5, 8, 12]}, index=idx))\n"
+    "df = pd.DataFrame({'t': [1, 2, 3], 'v': [4, 5, 6], 'region': ['e', 'w', 'e']})\n"
+    "st.bar_chart(df, x='t', y='v')\n"
+    "st.line_chart(df, x='t', y='v', color='region')\n"
+    "st.line_chart(pd.DataFrame({'a': [1, 2], 'b': [3, 4], 't': [0, 1]}), x='t', y=['a', 'b'])\n"
+    "st.altair_chart(alt.Chart(df).mark_bar().encode(x='t', y='v'))\n"
+)
+
+
+def test_every_chart_names_the_keys_its_records_use():
+    """The record keys are the app's column names on some charts ({x, revenue}, {t, v}), so a
+    reader of `data` couldn't know where the plotted value is without guessing (#233)."""
+    charts = _charts(_engine(FIELDS_APP))
+    assert [c["fields"] for c in charts] == [
+        {"x": "x", "series": None, "value": "revenue"},       # one series: the column's name
+        {"x": "x", "series": "series", "value": "value"},     # several, melted by Streamlit
+        {"x": "t", "series": None, "value": "v"},             # explicit columns keep their names
+        {"x": "t", "series": "region", "value": "v"},
+        {"x": "t", "series": "series", "value": "value"},
+        {"x": "t", "series": None, "value": "v"},             # altair: `region` isn't plotted
+    ]
+    for c in charts:  # every named key is in the records
+        named = {k for k in c["fields"].values() if k}
+        assert named <= set(c["data"][0])
+
+
+def test_fields_reach_the_cli_json(tmp_path, capsys):
+    from streamlit_mcp.cli import main
+    app = tmp_path / "c.py"
+    app.write_text(FIELDS_APP)
+    assert main(["inspect", str(app), "--layout", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    first = next(o for o in out["outputs"] if o["kind"] == "chart")
+    assert first["fields"] == {"x": "x", "series": None, "value": "revenue"}
+
+
+def test_other_outputs_keep_their_shape():
+    outputs = _engine(DASHBOARD_APP).read_output()["outputs"]
+    assert all("fields" not in o for o in outputs if o["kind"] != "chart")

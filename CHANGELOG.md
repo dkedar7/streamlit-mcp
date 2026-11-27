@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **New:** every `chart` output carries `fields`, `{"x", "series", "value"}`, naming the record
+  key for each, or `null` where the chart has none (#233). Record keys are the app's column names
+  on a single-series chart, a chart given explicit columns and an Altair chart, so a reader
+  couldn't find the plotted value without guessing. The records themselves are unchanged.
+
 ## 0.16.1 (2026-11-26)
 
 - **Fix:** a Plotly area chart read as `plotly line chart`, though `st.area_chart` reads

@@ -44,8 +44,10 @@ A chart that carries its own data (`st.line_chart`, `bar_chart`, `area_chart`, `
 records, up to 200 of them (a chart of several series is cut along the x-axis, so every
 series stays in `data`). A native chart of several series reads
 `{"x": "Jan", "series": "revenue", "value": 10}`; a single series, or a chart given explicit
-columns, keeps the app's column names. `--read` prints the summary; `--json` and MCP include
-`data`. Pyplot, maps and images are not captured.
+columns, keeps the app's column names. So every chart also carries `fields`, which names the
+record key for its x-axis, series and plotted value, or `null` where it has none:
+`{"x": "x", "series": null, "value": "revenue"}` for one series. `--read` prints the summary;
+`--json` and MCP include `data` and `fields`. Pyplot, maps and images are not captured.
 
 An `st.plotly_chart` is a `chart` output too, read from the figure itself (plotly isn't needed by
 streamlit-mcp). Each scatter, line, area or bar trace is a series, and its records read

@@ -193,3 +193,7 @@ def test_plotly_area_charts_read_like_the_native_one(tmp_path, capsys):
     assert charts == ["[chart] area chart: v over 1, 2, 3 (3 points)",
                       "[chart] plotly area chart: v over 1, 2, 3 (3 points)",
                       "[chart] plotly area chart: v over 1, 2, 3 (3 points)"]
+
+
+def test_a_plotly_chart_names_its_canonical_fields():
+    assert _out(GROUPED).fields == {"x": "x", "series": "series", "value": "value"}

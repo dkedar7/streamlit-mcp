@@ -125,6 +125,8 @@ def _output_to_dict(o) -> dict:
     out = {"kind": o.kind, "text": o.text}
     if o.data is not None:
         out["data"] = o.data
+    if getattr(o, "fields", None) is not None:
+        out["fields"] = o.fields
     return out
 
 
