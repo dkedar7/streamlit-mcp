@@ -18,6 +18,7 @@ import json
 import math
 import re
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -34,6 +35,50 @@ def _stdout_to_stderr():
         yield
     finally:
         sys.stdout = saved
+
+
+# The st.user that the run starting on this thread should see, on a Streamlit whose AppTest has
+# no `user` (before ~1.67, its runner hard-codes {"email": "test@example.com"}). Thread-local
+# because a served app's sessions can run at once, and AppTest builds its runner on the calling
+# thread.
+_USER_FOR_RUN = threading.local()
+
+
+@contextlib.contextmanager
+def _seeded_user(user: Optional[dict]):
+    """Make the AppTest run inside this block read ``user`` as st.user (#235). Only needed where
+    AppTest lacks a ``user`` attribute; ``user=None`` changes nothing."""
+    if user is None:
+        yield
+        return
+    _install_user_runner()
+    _USER_FOR_RUN.user = copy.deepcopy(user)
+    try:
+        yield
+    finally:
+        _USER_FOR_RUN.user = None
+
+
+def _install_user_runner() -> None:
+    """Swap AppTest's runner for one that takes its user_info from _USER_FOR_RUN (idempotent).
+    ScriptRunner keeps the user_info it is built with in ``_user_info`` and copies it into each
+    run's context, which is what st.user reads."""
+    from streamlit.testing.v1 import app_test
+
+    base = app_test.LocalScriptRunner
+    if getattr(base, "_streamlit_mcp_user", False):
+        return
+
+    class _UserRunner(base):  # type: ignore[misc, valid-type]
+        _streamlit_mcp_user = True
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            user = getattr(_USER_FOR_RUN, "user", None)
+            if user is not None:
+                self._user_info = copy.deepcopy(user)
+
+    app_test.LocalScriptRunner = _UserRunner
 
 # The widget kinds we drive (origin R10). Order is display order.
 SUPPORTED_KINDS = (
@@ -255,7 +300,8 @@ class Runtime(Protocol):
 class AppTestRuntime:
     """Drives one Streamlit app instance via AppTest. One instance == one session."""
 
-    def __init__(self, app_path: Optional[str] = None, *, script: Optional[str] = None):
+    def __init__(self, app_path: Optional[str] = None, *, script: Optional[str] = None,
+                 user: Optional[dict] = None):
         from streamlit.testing.v1 import AppTest
 
         if script is not None:
@@ -264,6 +310,12 @@ class AppTestRuntime:
             self.at = AppTest.from_file(app_path)
         else:
             raise ValueError("provide app_path or script")
+        # What the app reads as st.user (#235). None keeps AppTest's own default test user. It
+        # REPLACES that default rather than merging into it, as a real login shows only the
+        # identity provider's claims.
+        self._user = copy.deepcopy(user) if user is not None else None
+        if self._user is not None and hasattr(self.at, "user"):
+            self.at.user = copy.deepcopy(self._user)
         self._started = False
         # Writes to st.form fields that are waiting for that form's submit click:
         # form id -> {widget id -> value}. See _hold_for_submit.
@@ -279,7 +331,7 @@ class AppTestRuntime:
         box; a real app run finishes in well under a second."""
         for state_key, edits in self._table_edits.items():
             self.at.session_state[state_key] = copy.deepcopy(edits)
-        with _stdout_to_stderr():
+        with _stdout_to_stderr(), _seeded_user(None if hasattr(self.at, "user") else self._user):
             self.at.run(timeout=30)
 
     def run(self) -> None:

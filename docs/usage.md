@@ -213,13 +213,32 @@ streamlit-mcp call app.py --set "Name=agent" --click "Save" --read
 streamlit-mcp call app.py --read-only --set "Name=x"   # guardrail: blocked, exit 1
 streamlit-mcp call app.py --allow "Name" --set "Age=5"  # allow-list: 'Age' blocked, exit 1
 streamlit-mcp call app.py --redact access_token --state # that key is dropped from state
+streamlit-mcp inspect app.py --user is_logged_in=true --user email=alice@example.com
 streamlit-mcp config app.py                  # MCP client config, app path made absolute
 streamlit-mcp --version
 ```
 
+### Apps behind a login
+
+An app gated on `st.user` (`if st.user.is_logged_in:`) shows an agent only its logged-out branch,
+or crashes, because nobody logged in. `--user key=value` on `serve`, `inspect`, `call` and `config`
+sets what the app reads as `st.user`, for every session:
+
+```bash
+streamlit-mcp serve app.py --user is_logged_in=true --user email=alice@example.com
+streamlit-mcp call app.py --user is_logged_in=false --read   # the logged-out branch
+```
+
+The flags replace AppTest's default test user (`{"email": "test@example.com"}`) rather than adding
+to it, as a real login shows only what the identity provider sends. A value is the string as
+written, except `true`, `false`, `null` and JSON objects or arrays, so `sub=1234` stays a string
+and `tokens={"access": "..."}` fills `st.user.tokens`. `is_logged_in` must be
+`true` or `false`. Without `--user` nothing changes: as in a browser with no `[auth]` configured,
+`st.user` has no `is_logged_in`. `serve`'s status line names the keys it set, not their values.
+
 `config` prints an `mcpServers` JSON block for Claude Desktop, Cursor and similar clients, or with
 `--client claude-code` a `claude mcp add` command, or with `--client vscode` a `.vscode/mcp.json`
-`servers` block (VS Code ignores `mcpServers`). It carries `--read-only`/`--allow`/`--redact`
+`servers` block (VS Code ignores `mcpServers`). It carries `--read-only`/`--allow`/`--redact`/`--user`
 into the server command. With `--transport http` (or `sse`) it prints the URL wiring instead,
 including the `Authorization` header when you pass `--bearer-token`, and prints the `serve` command
 to start the server on stderr.
