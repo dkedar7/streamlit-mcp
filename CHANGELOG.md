@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.0 (2026-11-28)
+
+- **New:** `--user key=value` sets what the app reads as `st.user`, on `serve`, `inspect`, `call`
+  and `config` (#235). An app gated on `if st.user.is_logged_in:` crashed with no widgets, and one
+  using `st.user.get("is_logged_in", False)` showed only its logged-out branch, so its real UI was
+  unreachable over both the CLI and MCP.
+  - `--user is_logged_in=true --user email=alice@example.com` renders the logged-in branch;
+    `--user is_logged_in=false` the logged-out one. Every MCP session sees the same user.
+  - It replaces AppTest's default test user rather than adding to it. Values are strings as
+    written, except `true`/`false`/`null` and JSON objects or arrays (so an OIDC `sub` that looks
+    numeric stays a string, and `tokens={...}` fills `st.user.tokens`). `is_logged_in` must be a
+    boolean.
+  - With no `--user`, nothing changes. `serve`'s status line names the keys set, never the values.
+  - Works on the locked Streamlit 1.58, whose AppTest has no `user` to set, as well as 1.67+.
+  - Not included: an MCP tool to switch users mid-session (the issue's optional `set_user`).
+
 ## 0.16.1 (2026-11-26)
 
 - **Fix:** a Plotly area chart read as `plotly line chart`, though `st.area_chart` reads

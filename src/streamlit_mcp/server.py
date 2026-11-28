@@ -60,7 +60,7 @@ def client_url(host: str, port: int, path: str) -> str:
 
 
 def startup_status(app_path: str, transport: str, host: str, port: int,
-                   guard: Optional[Any]) -> str:
+                   guard: Optional[Any], user: Optional[dict] = None) -> str:
     """What ``serve`` is about to run, with the guardrails and auth it actually applies (#201).
 
     Built from the same guard object the engine enforces, so it reports the effective posture
@@ -93,6 +93,8 @@ def startup_status(app_path: str, transport: str, host: str, port: int,
     if redact:
         rails.append(f"redacting: {', '.join(sorted(redact))}")
     lines.append(f"  guardrails: {'; '.join(rails) or 'none'}")
+    if user is not None:  # key names only: a value can be a token (st.user.tokens)
+        lines.append(f"  st.user:    set by --user ({', '.join(sorted(user)) or 'empty'})")
     return "\n".join(lines)
 
 
@@ -143,7 +145,7 @@ def _validate_transport(transport: str) -> str:
 
 def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "streamlit-mcp",
                  auth: Optional[Any] = None, session_ttl: Optional[float] = None,
-                 max_sessions: Optional[int] = None):
+                 max_sessions: Optional[int] = None, user: Optional[dict] = None):
     """Construct a FastMCP server exposing the core tools (+ any semantic tools).
 
     ``auth`` is a FastMCP auth provider (see ``bearer_auth``); when set, the HTTP/SSE
@@ -163,7 +165,7 @@ def build_server(app_path: str, guard: Optional[Any] = None, app_name: str = "st
         it therefore says nothing a token would protect, not even the versions."""
         from starlette.responses import JSONResponse
         return JSONResponse({"status": "ok", "server": "streamlit-mcp"})
-    sessions = SessionManager(lambda: AppTestRuntime(app_path), ttl=session_ttl,
+    sessions = SessionManager(lambda: AppTestRuntime(app_path, user=user), ttl=session_ttl,
                               max_sessions=max_sessions)
 
     def dispatch(ctx: Any, op: str, *args: Any) -> dict:
@@ -257,7 +259,7 @@ def _guarded_tool(spec, guard):
     return wrapped
 
 
-def _load_app_semantic_tools(app_path: str) -> None:
+def _load_app_semantic_tools(app_path: str, user: Optional[dict] = None) -> None:
     """Run the served app once so any ``@mcp_tool`` it defines registers BEFORE we build the
     server's tool list. The decorator only fires when the app module executes, and per-client
     sessions run it lazily — too late for ``build_server``/``_register_semantic_tools``. This
@@ -265,7 +267,7 @@ def _load_app_semantic_tools(app_path: str) -> None:
     documented ``serve`` entrypoint. Best-effort: a broken app surfaces its error per session,
     so don't block serve startup here. (Re-registration on later session runs is idempotent.)"""
     try:
-        AppTestRuntime(app_path).run()
+        AppTestRuntime(app_path, user=user).run()
     except Exception:
         pass
 
@@ -285,8 +287,9 @@ def check_bind(transport: str, host: str, has_token: bool) -> None:
 
 def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
           port: int = 8000, guard: Optional[Any] = None, session_ttl: Optional[float] = None,
-          max_sessions: Optional[int] = None) -> None:
-    """Build and run the server on the chosen transport (blocking)."""
+          max_sessions: Optional[int] = None, user: Optional[dict] = None) -> None:
+    """Build and run the server on the chosen transport (blocking). ``user`` is what every
+    session's app reads as ``st.user`` (#235); None keeps AppTest's default test user."""
     _validate_transport(transport)
     if session_ttl is not None and session_ttl <= 0:
         raise ValueError(f"--session-ttl must be a positive number of seconds, got {session_ttl}")
@@ -296,11 +299,11 @@ def serve(app_path: str, transport: str = "stdio", host: str = "127.0.0.1",
     if transport in ("http", "sse"):
         auth = bearer_auth(guard)
         check_bind(transport, host, auth is not None)
-    _load_app_semantic_tools(app_path)
+    _load_app_semantic_tools(app_path, user)
     mcp = build_server(app_path, guard=guard, auth=auth, session_ttl=session_ttl,
-                       max_sessions=max_sessions)
+                       max_sessions=max_sessions, user=user)
     # stderr only: under stdio, stdout is the JSON-RPC channel.
-    print(startup_status(app_path, transport, host, port, guard), file=sys.stderr, flush=True)
+    print(startup_status(app_path, transport, host, port, guard, user), file=sys.stderr, flush=True)
     if transport == "stdio":
         mcp.run()
     else:

@@ -17,6 +17,8 @@ streamlit-mcp serve app.py --transport http --port 8000
 # drive it yourself from the terminal (same engine the agent uses)
 streamlit-mcp inspect app.py
 streamlit-mcp call app.py --set "Name=agent" --click "Save" --read
+# an app behind st.login: present a logged-in user
+streamlit-mcp serve app.py --user is_logged_in=true --user email=alice@example.com
 ```
 
 Streamlit has no callback graph — it reruns the whole script per interaction — so

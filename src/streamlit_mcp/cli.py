@@ -66,8 +66,35 @@ def build_guardrails(args: argparse.Namespace) -> Optional[Guardrails]:
     )
 
 
+def parse_user(items: Optional[list[str]]) -> Optional[dict]:
+    """The ``--user key=value`` flags as the dict the app reads as ``st.user`` (#235), or None
+    when none were given (AppTest's default test user).
+
+    A value is the string as written, except ``true``/``false``/``null`` and a JSON object or
+    array, which are parsed. Numbers stay strings: identity claims such as an OIDC ``sub`` are
+    strings even when they look numeric. ``is_logged_in`` must be true or false."""
+    if not items:
+        return None
+    user: dict = {}
+    for item in items:
+        key, sep, raw = item.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise ValueError(f"--user expects 'key=value', got {item!r}")
+        value: Any = raw
+        if raw in ("true", "false", "null") or raw.lstrip()[:1] in ("{", "["):
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                raise ValueError(f"--user {key}: {raw!r} is not valid JSON") from None
+        if key == "is_logged_in" and not isinstance(value, bool):
+            raise ValueError(f"--user is_logged_in must be true or false, got {raw!r}")
+        user[key] = value
+    return user
+
+
 def _engine(args: argparse.Namespace) -> Engine:
-    rt = AppTestRuntime(args.app)
+    rt = AppTestRuntime(args.app, user=parse_user(getattr(args, "user", None)))
     rt.run()
     return Engine(rt, guard=build_guardrails(args), app_path=args.app)
 
@@ -178,6 +205,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             guard=build_guardrails(args),
             session_ttl=args.session_ttl,
             max_sessions=args.max_sessions,
+            user=parse_user(args.user),
         )
     except ValueError as e:  # fail-closed / bad transport -> clean message, not a traceback
         print(str(e), file=sys.stderr)
@@ -192,7 +220,8 @@ def _serve_args(args: argparse.Namespace, app: str) -> list[str]:
         argv += ["--transport", args.transport, "--host", args.host, "--port", str(args.port)]
     if args.read_only:
         argv.append("--read-only")
-    for flag, values in (("--allow", args.allow), ("--redact", args.redact)):
+    for flag, values in (("--allow", args.allow), ("--redact", args.redact),
+                         ("--user", getattr(args, "user", None))):
         for v in values or []:
             argv += [flag, v]
     if args.bearer_token:
@@ -219,6 +248,11 @@ def cmd_config(args: argparse.Namespace) -> int:
     if not app.is_file():
         print(f"warning: {app} does not exist (yet); the client will fail to start it",
               file=sys.stderr)
+    try:
+        parse_user(getattr(args, "user", None))  # serve would refuse a malformed --user; don't print a config for it
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
     serve_argv = _serve_args(args, str(app))
     if args.transport == "stdio":
         if args.client == "claude-code":
@@ -382,6 +416,14 @@ def _add_guard_flags(p: argparse.ArgumentParser, *, bearer: bool) -> None:
                             "non-loopback host)")
 
 
+def _add_user_flag(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--user", action="append", metavar="KEY=VALUE",
+                   help="what the app reads as st.user (repeatable), e.g. --user "
+                        "is_logged_in=true --user email=alice@example.com. Replaces AppTest's "
+                        "default test user; true/false/null and JSON objects are parsed, "
+                        "anything else is a string")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="streamlit-mcp",
                                      description="Serve a Streamlit app as an MCP server.")
@@ -402,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="keep at most N client sessions, discarding the least recently "
                               "used (default: unlimited)")
     _add_guard_flags(p_serve, bearer=True)
+    _add_user_flag(p_serve)
     p_serve.set_defaults(func=cmd_serve)
 
     p_config = sub.add_parser(
@@ -418,6 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.add_argument("--host", default="127.0.0.1")
     p_config.add_argument("--port", type=int, default=8000)
     _add_guard_flags(p_config, bearer=True)
+    _add_user_flag(p_config)
     p_config.set_defaults(func=cmd_config)
 
     p_inspect = sub.add_parser("inspect", help="print the app's widgets")
@@ -427,6 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--strict", action="store_true",
                            help="exit non-zero if the served app raised an uncaught exception")
     _add_guard_flags(p_inspect, bearer=False)
+    _add_user_flag(p_inspect)
     p_inspect.set_defaults(func=cmd_inspect)
 
     p_call = sub.add_parser("call", help="drive the app (same engine agents use)")
@@ -442,6 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_call.add_argument("--strict", action="store_true",
                         help="exit non-zero if the served app raised an uncaught exception")
     _add_guard_flags(p_call, bearer=False)
+    _add_user_flag(p_call)
     p_call.set_defaults(func=cmd_call)
 
     return parser
